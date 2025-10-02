@@ -1,0 +1,38 @@
+[
+  {
+    "key": "foo",
+    "value": "bar"
+  },
+  {
+    "key": "prolibu-apiKey-dev",
+    "value": "9eaabaf0f491a525d491514eea6a0b3ccca0c20a1868f2da0c1fa177d63256eb61b60738d1fb49f6573205dbbd349614"
+  },
+  {
+    "key": "prolibu-apiKey-prod",
+    "value": "9eaabaf0f491a525d491514eea6a0b3ccca0c20a1868f2da0c1fa177d63256eb61b60738d1fb49f6573205dbbd349614"
+  },
+  {
+    "key": "salesforce-instanceUrl-dev",
+    "value": "flow-enterprise-9829--oxosandpr.sandbox.my.salesforce.com"
+  },
+  {
+    "key": "salesforce-customerKey-dev",
+    "value": "3MVG9RfdU0uTjsG1r35cYyNRAb2urL1R67v4n00vN_w1p0QoMZMWl.3QGJoltF5jMbvJHOgk.PbZBMiyoNVNr"
+  },
+  {
+    "key": "salesforce-customerSecret-dev",
+    "value": "8961037917E2D7240CF6C175D331223CC0873BC59E33BA844086BE3AC0DE343D"
+  },
+  {
+    "key": "salesforce-instanceUrl-prod",
+    "value": "flow-enterprise-9829--oxosandpr.sandbox.my.salesforce.com"
+  },
+  {
+    "key": "salesforce-customerKey-prod",
+    "value": "3MVG9RfdU0uTjsG1r35cYyNRAb2urL1R67v4n00vN_w1p0QoMZMWl.3QGJoltF5jMbvJHOgk.PbZBMiyoNVNr"
+  },
+  {
+    "key": "salesforce-customerSecret-prod",
+    "value": "8961037917E2D7240CF6C175D331223CC0873BC59E33BA844086BE3AC0DE343D"
+  }
+]
