@@ -522,7 +522,6 @@ var require_SalesforceApi = __commonJS({
       }
     }
     function handleSalesforceAxiosError(err, context = "Salesforce operation") {
-      console.log("Handling Salesforce axios error...", JSON.stringify(err, null, 2));
       let errorMessage = "Unknown error";
       let errorDetails = null;
       let shouldInvalidateToken = false;
@@ -1939,9 +1938,124 @@ var vars = getRequiredVars({
     customerKey: vars.salesforceCustomerKey,
     customerSecret: vars.salesforceCustomerSecret
   });
+  async function afterCreateWithDuplicateHandling(objectName, config) {
+    try {
+      const data = await DataMapper.map({
+        data: eventData.doc,
+        map: config.map,
+        transforms: config.transforms,
+        afterTransforms: config.afterTransforms
+      });
+      console.log("%c\u{1F7E2} [AGOX] data Mapeada", "color: green; font-weight: bold;", data);
+      let result;
+      if (data.Email) {
+        console.log(`\u{1F50D} Buscando contact existente por email: ${data.Email}`);
+        try {
+          const existingContacts = await salesforceApi.find("Contact", {
+            where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+            limit: 1,
+            select: "Id"
+          });
+          console.log(`\u{1F4CA} Encontrados: ${existingContacts.totalSize} contactos existentes`);
+          if (existingContacts.totalSize > 0) {
+            result = { id: existingContacts.records[0].Id };
+            console.log(`\u{1F4E7} Usando contact existente: ${result.id}`);
+            try {
+              await salesforceApi.update("Contact", result.id, data);
+              console.log(`\u{1F504} Contact actualizado: ${result.id}`);
+            } catch (updateError) {
+              console.warn("Error actualizando contact:", updateError.message);
+            }
+          } else {
+            console.log(`\u2728 Email \xFAnico, creando nuevo contact...`);
+            try {
+              result = await salesforceApi.create("Contact", data);
+              console.log(`\u2705 Contact creado: ${result.id}`);
+            } catch (createError) {
+              console.error(`\u274C Error creando:`, createError.message);
+              if (createError.message?.includes("duplicate")) {
+                console.log("\u{1F504} Race condition detectada, buscando de nuevo...");
+                const retrySearch = await salesforceApi.find("Contact", {
+                  where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+                  limit: 1,
+                  select: "Id"
+                });
+                if (retrySearch.totalSize > 0) {
+                  result = { id: retrySearch.records[0].Id };
+                  console.log(`\uFFFD Contact encontrado en retry: ${result.id}`);
+                } else {
+                  throw createError;
+                }
+              } else {
+                throw createError;
+              }
+            }
+          }
+        } catch (searchError) {
+          console.error("\u274C Error en b\xFAsqueda:", searchError.message);
+          throw searchError;
+        }
+      } else {
+        console.log("\u26A0\uFE0F Sin email, creando directamente...");
+        result = await salesforceApi.create("Contact", data);
+        console.log(`\u2705 Contact creado sin email: ${result.id}`);
+      }
+      if (result && result.id) {
+        const refId = result.id;
+        const refUrl = `https://${vars.salesforceInstanceUrl}/lightning/r/Contact/${result.id}/view`;
+        try {
+          const updatedDoc = await prolibuApi.update(objectName, eventData.doc._id, { refId, refUrl });
+          Object.assign(eventData.doc, updatedDoc);
+          console.log(`\u2705 Contact asociado con Salesforce: ${refId}`);
+        } catch (error) {
+          console.error(`Failed to update Prolibu Contact with Salesforce refId:`, error);
+        }
+      } else {
+        console.error("\u274C No hay result v\xE1lido para actualizar Prolibu");
+      }
+    } catch (error) {
+      console.error(`Failed to create Salesforce Contact:`, error);
+      const isDuplicateError = error.message?.includes("duplicate") || error.message?.includes("ya existe") || error.message?.includes("DUPLICATE_VALUE") || error.message?.includes("creating a duplicate");
+      if (isDuplicateError) {
+        console.log("\u{1F50D} Error de duplicado detectado, buscando registro existente...");
+        try {
+          const data = await DataMapper.map({
+            data: eventData.doc,
+            map: config.map,
+            transforms: config.transforms,
+            afterTransforms: config.afterTransforms
+          });
+          console.log(`\u{1F50D} Buscando por email: ${data.Email}`);
+          if (data.Email) {
+            const existing = await salesforceApi.find("Contact", {
+              where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+              limit: 1,
+              select: "Id"
+            });
+            console.log(`\u{1F4CA} Resultado b\xFAsqueda fallback: ${existing.totalSize} contactos encontrados`);
+            if (existing.totalSize > 0) {
+              const refId = existing.records[0].Id;
+              const refUrl = `https://${vars.salesforceInstanceUrl}/lightning/r/Contact/${refId}/view`;
+              const updatedDoc = await prolibuApi.update(objectName, eventData.doc._id, { refId, refUrl });
+              Object.assign(eventData.doc, updatedDoc);
+              console.log(`\u{1F517} Asociado con contact existente: ${refId}`);
+              return;
+            } else {
+              console.error("\u274C No se encontr\xF3 el contact duplicado en fallback");
+            }
+          } else {
+            console.error("\u274C No hay email para buscar en fallback");
+          }
+        } catch (findError) {
+          console.error("\u274C Error en b\xFAsqueda de fallback:", findError.message);
+        }
+      } else {
+        console.error("\u274C Error no relacionado con duplicados:", error.message);
+      }
+    }
+  }
   await salesforceApi.authenticate();
   async function afterCreate(objectName, config) {
-    console.log(eventData.doc);
     try {
       const data = await DataMapper.map({
         data: eventData.doc,
@@ -1974,6 +2088,7 @@ var vars = getRequiredVars({
           transforms: config.transforms,
           afterTransforms: config.afterTransforms
         });
+        console.log(`\u{1F50D} Updating existing ${mapToObject} in Salesforce with ID: ${refId}`, data);
         await salesforceApi.update(mapToObject, refId, data);
       } catch (error) {
         console.error(`Failed to update Salesforce '${mapToObject}':`, error);
@@ -2039,30 +2154,98 @@ var vars = getRequiredVars({
       },
       transforms: {
         OwnerId: toSalesforceUserId
+      },
+      afterTransforms: {
+        Estado_cliente__c: function(value) {
+          const estadoMapping = {
+            "ACTIVO": "ACTIVO",
+            "INACTIVO": "INACTIVO",
+            "PENDIENTE": "ACTIVO",
+            "SUSPENDIDO": "INACTIVO"
+          };
+          const mappedValue = estadoMapping[value] || "ACTIVO";
+          return mappedValue;
+        },
+        Ruta__c: function() {
+          return "Activa";
+        }
       }
-      // afterTransforms: {
-      //    Tipo_de_Cuenta_cc__c: function() {
-      //     return 'CASA MATRIZ';
-      //   },
-      // }
     },
     Contact: {
       active: true,
+      mapToObject: "Contact",
       map: require_ContactMap(),
       events: {
-        "Contact.afterCreate": afterCreate,
+        "Contact.afterCreate": afterCreateWithDuplicateHandling,
         "Contact.afterUpdate": afterUpdate,
         "Contact.afterDelete": afterDelete
       },
       transforms: {
-        OwnerId: toSalesforceUserId
+        OwnerId: toSalesforceUserId,
+        AccountId: async function(prolibuCompanyId) {
+          if (!prolibuCompanyId && eventData.doc?.contact) {
+            try {
+              const contact = await prolibuApi.findOne("Contact", eventData.doc.contact, {
+                select: "company"
+              });
+              if (contact?.company) {
+                prolibuCompanyId = contact.company;
+              }
+            } catch (error) {
+              console.warn("Error obteniendo company del contact:", error.message);
+            }
+          }
+          if (!prolibuCompanyId) return null;
+          try {
+            const company = await prolibuApi.findOne("Company", prolibuCompanyId, {
+              select: "refId"
+            });
+            if (company?.refId) {
+              try {
+                const sfAccount = await salesforceApi.findOne("Account", company.refId, {
+                  select: "Id, Estado_cliente__c, Name"
+                });
+                if (sfAccount) {
+                  if (sfAccount.Estado_cliente__c !== "ACTIVO") {
+                    await salesforceApi.update("Account", company.refId, {
+                      Estado_cliente__c: "ACTIVO"
+                    });
+                    await salesforceApi.findOne("Account", company.refId, {
+                      select: "Estado_cliente__c"
+                    });
+                  }
+                } else {
+                  console.error("\u274C No se encontr\xF3 el Account en Salesforce");
+                }
+              } catch (accountError) {
+                console.error("\u274C Error verificando/activando Account:", accountError.message);
+              }
+              return company.refId;
+            }
+            return null;
+          } catch (error) {
+            console.warn("Error mapeando company:", error.message);
+            return null;
+          }
+        }
       }
     },
     Deal: {
       active: true,
       mapToObject: "Opportunity",
       map: {
-        ...require_DealMap()
+        ...require_DealMap(),
+        "customFields.tipoEvento": "Tipo_de_Servicio__c",
+        "customFields.numeroDePersonas": "N_mero_de_Asistentes__c",
+        "customFields.numeroDeHabitaciones": "N_mero_de_Habitaciones__c",
+        // Fechas del evento
+        "customFields.fechaHoraIngreso": "Fecha_Check_In__c",
+        "customFields.fechaHoraSalida": "Fecha_Check_Out__c",
+        // Ubicación
+        "customFields.ciudadDeInteres": "Ciudad_de_Inter_s__c",
+        "customFields.hotelPreferido": "Hotel__c",
+        // Información del servicio
+        "customFields.detalleDelRequerimiento": "Description"
       },
       events: {
         "Deal.afterCreate": afterCreate,
@@ -2070,21 +2253,100 @@ var vars = getRequiredVars({
         "Deal.afterDelete": afterDelete
       },
       transforms: {
-        OwnerId: toSalesforceUserId
+        OwnerId: toSalesforceUserId,
+        ContactId: async function(prolibuContactId) {
+          if (!prolibuContactId) return null;
+          try {
+            const contact = await prolibuApi.findOne("Contact", prolibuContactId, {
+              select: "email refId",
+              populate: "*"
+            });
+            if (contact?.refId) {
+              return contact.refId;
+            }
+            if (contact?.email) {
+              const sfContacts = await salesforceApi.find("Contact", {
+                where: `Email = '${contact.email.replace(/'/g, "\\'")}'`,
+                limit: 1,
+                select: "Id"
+              });
+              return sfContacts.totalSize > 0 ? sfContacts.records[0].Id : null;
+            }
+            return null;
+          } catch (error) {
+            console.warn("Error mapeando contact:", error.message);
+            return null;
+          }
+        },
+        AccountId: async function(prolibuCompanyId) {
+          if (!prolibuCompanyId && eventData.doc?.contact) {
+            try {
+              const contact = await prolibuApi.findOne("Contact", eventData.doc.contact, {
+                select: "company"
+              });
+              if (contact?.company) {
+                prolibuCompanyId = contact.company;
+              }
+            } catch (error) {
+              console.warn("Error obteniendo company del contact para Deal:", error.message);
+            }
+          }
+          if (!prolibuCompanyId) return null;
+          try {
+            const company = await prolibuApi.findOne("Company", prolibuCompanyId, {
+              select: "refId"
+            });
+            if (company?.refId) {
+              try {
+                const sfAccount = await salesforceApi.findOne("Account", company.refId, {
+                  select: "Id, Estado_cliente__c, Ruta__c, Name, CreatedDate"
+                });
+                if (sfAccount) {
+                  const needsUpdate = {
+                    ...sfAccount.Estado_cliente__c !== "ACTIVO" && { Estado_cliente__c: "ACTIVO" },
+                    ...sfAccount.Ruta__c !== "Activa" && { Ruta__c: "Activa" }
+                  };
+                  if (Object.keys(needsUpdate).length > 0) {
+                    await salesforceApi.update("Account", company.refId, needsUpdate);
+                    await salesforceApi.findOne("Account", company.refId, {
+                      select: "Estado_cliente__c, Ruta__c"
+                    });
+                  }
+                } else {
+                  console.error("\u274C [DEAL] No se encontr\xF3 el Account en Salesforce");
+                }
+              } catch (accountError) {
+                console.error("\u274C [DEAL] Error verificando/activando Account:", accountError.message);
+              }
+              return company.refId;
+            }
+            return null;
+          } catch (error) {
+            console.warn("Error mapeando company para Deal:", error.message);
+            return null;
+          }
+        }
       },
       afterTransforms: {
-        StageName: async function(prolibuStageId) {
-          if (prolibuStageId) {
-            const stage = await prolibuApi.findOne("Stage", prolibuStageId, { select: "stageName" });
-            return stage?.stageName || "--";
-          }
-          return "--";
+        StageName: function() {
+          return "Captura de Necesidades";
         },
         CloseDate: function(value) {
-          const closeDate = value || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+          if (value) {
+            const date = new Date(value);
+            if (!isNaN(date.getTime())) {
+              return date.toISOString().split("T")[0];
+            }
+          }
           const in30Days = /* @__PURE__ */ new Date();
           in30Days.setDate(in30Days.getDate() + 30);
-          return closeDate;
+          return in30Days.toISOString().split("T")[0];
+        },
+        Ciudad_de_Inter_s__c: function(value) {
+          return eventData.doc?.customFields?.ciudadDeInteres || value || "Bogot\xE1";
+        },
+        Hotel__c: function(value) {
+          return eventData.doc?.customFields?.hotelPreferido || value || "Hotel Distrito";
         }
       }
     }

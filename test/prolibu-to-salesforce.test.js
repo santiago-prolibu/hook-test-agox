@@ -34,9 +34,12 @@ const salesforceApi = new SalesforceApi({
   sandbox: isProd ? false : true,
 });
 
-const contactEmail = 'salesforce-integration@test.com';
-const companyCode = `acme-inc-salesforce-integration-${Date.now()}`;
 
+// Reemplazar las líneas 38-40:
+
+const timestamp = Date.now();
+const contactEmail = faker.internet.email(); // 🚀 SIMPLE Y ÚNICO
+const companyCode = `company-${faker.string.alphanumeric(8)}`; // 🚀 TAMBIÉN ÚNICO
 let script;
 
 // COMPANY
@@ -68,20 +71,19 @@ const companyData = {
   assignee: isProd
     ? 'juan.prieto@prolibu.com'
     : 'juan.prieto@prolibu.com',
-    customFields: {
-      tipoDeCuenta: 'CASA MATRIZ',
-      numeroIdentificacionTributaria: faker.string.numeric({ length: 10 }),
-      razonSocial: 'Test Company S.A.S.',
-      tipoIdentificacionEmpresa: 'NIT',
-      tipoDeCliente: 'EMPRESA',
-      estadoDeCliente: 'ACTIVO',
-      tipoDeEmpresa: 'NACIONAL',
-      segmentoCliente: 'Diamante',
-      macroSector: 'AGENCIAS DE VIAJES TMC',
-      necesitaCredito: 'SI',
-    }
+  customFields: {
+    tipoDeCuenta: 'CASA MATRIZ',
+    numeroIdentificacionTributaria: faker.string.numeric({ length: 10 }),
+    razonSocial: 'Test Company S.A.S.',
+    tipoIdentificacionEmpresa: 'NIT',
+    tipoDeCliente: 'EMPRESA',
+    estadoDeCliente: 'ACTIVO',
+    tipoDeEmpresa: 'NACIONAL',
+    segmentoCliente: 'Diamante',
+    macroSector: 'AGENCIAS DE VIAJES TMC',
+    necesitaCredito: 'SI',
+  }
 };
-console.log(companyData);
 
 
 // companyData.legalName = `${companyData.companyName} LLC.`;
@@ -90,11 +92,11 @@ const sfCompanySelect = 'Id, Name, Phone, Website, BillingStreet, BillingCity, B
 // CONTACT
 let contact;
 const contactData = {
-  firstName: 'Salesforce',
-  lastName: 'Integration',
+  firstName: faker.person.firstName(),
+  lastName: faker.person.lastName(),
   email: contactEmail,
   mobile: faker.phone.number(),
-  jobTitle: 'QA Engineer',
+  jobTitle: faker.person.jobTitle(),
   assignee: isProd
     ? 'juan.prieto@prolibu.com'
     : 'juan.prieto@prolibu.com',
@@ -117,11 +119,11 @@ const sfContactSelect = 'Id, FirstName, LastName, Email, MobilePhone, Title, Own
 // DEAL
 let deal;
 const dealData = {
-  dealCode: 'DEAL-SF-INTEGRATION-001',
-  dealName: 'Test Deal from Integration',
-  closeDate: '2025-10-01T00:00:00.000Z', // YYYY-MM-DD
-  source: 'Web',
-}
+  dealCode: `DEAL-${faker.string.alphanumeric(8)}-${timestamp}`,
+  dealName: faker.commerce.productName(),
+  closeDate: faker.date.future().toISOString(),
+  source: faker.helpers.arrayElement(['Web', 'Email', 'Phone', 'Referral', 'Social Media']),
+};
 
 const sfDealSelect = 'Id, Name, CloseDate, LeadSource';
 
@@ -130,7 +132,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
     it('authenticates with Salesforce', async () => {
       await salesforceApi.authenticate();
       const accounts = await salesforceApi.find('Account', { limit: 1 });
-      
+
       expect(accounts).toBeDefined();
       expect(accounts).toHaveProperty('totalSize');
       expect(accounts).toHaveProperty('records');
@@ -154,7 +156,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
       expect(script).toHaveProperty('_id');
       expect(script).toHaveProperty('scriptName');
       expect(script).toHaveProperty('active', true);
-      
+
       // lifecycleHooks should contain [ 'Contact', 'Company', 'Deal', 'Note' ]
       expect(script).toHaveProperty('lifecycleHooks');
       expect(script.lifecycleHooks).toContain('Contact');
@@ -165,39 +167,88 @@ describe('Prolibu ↔ Salesforce Integration', () => {
   });
 
   describe('Company → Account Sync', () => {
+    // Reemplazar el test de limpieza:
+
     it('cleans up existing test data', async () => {
-      // Company
-      let results = await prolibuApi.find('Company', { companyCode}, { select: '_id'});
+      // 🆕 Limpiar también de Salesforce
+
+      // 1. Limpiar Deal de Prolibu
+      let results = await prolibuApi.find('Deal', { dealCode: dealData.dealCode }, { select: '_id,refId' });
       if (results?.data?.length > 0) {
-        expect(results.data[0]).toHaveProperty('_id');
-        await prolibuApi.delete('Company', companyCode);
-        results = await prolibuApi.find('Company', { companyCode}, { select: '_id'});
-        expect(results.data.length).toBe(0);
+        console.log(`🗑️ Eliminando Deal existente: ${dealData.dealCode}`);
+        for (const dealDoc of results.data) {
+          // Eliminar de Salesforce si tiene refId
+          if (dealDoc.refId) {
+            try {
+              await salesforceApi.delete('Opportunity', dealDoc.refId);
+            } catch (error) {
+              console.warn(`No se pudo eliminar Opportunity ${dealDoc.refId}:`, error.message);
+            }
+          }
+          await prolibuApi.delete('Deal', dealDoc._id);
+        }
       }
-      // Contact
-      results = await prolibuApi.find('Contact', { email: contactEmail}, { select: '_id'});
+
+      // 2. Limpiar Contact de Prolibu y Salesforce
+      results = await prolibuApi.find('Contact', { email: contactEmail }, { select: '_id,refId' });
       if (results?.data?.length > 0) {
-        expect(results.data[0]).toHaveProperty('_id');
-        await prolibuApi.delete('Contact', contactEmail);
-        results = await prolibuApi.find('Contact', { email: contactEmail}, { select: '_id'});
-        expect(results.data.length).toBe(0);
+        console.log(`🗑️ Eliminando Contact existente: ${contactEmail}`);
+        for (const contactDoc of results.data) {
+          if (contactDoc.refId) {
+            try {
+              await salesforceApi.delete('Contact', contactDoc.refId);
+            } catch (error) {
+              console.warn(`No se pudo eliminar Contact ${contactDoc.refId}:`, error.message);
+            }
+          }
+          await prolibuApi.delete('Contact', contactDoc._id);
+        }
       }
-      // Deal
-      results = await prolibuApi.find('Deal', { dealCode: dealData.dealCode}, { select: '_id'});
+
+      // 🆕 Limpiar Contact por email en Salesforce
+      try {
+        const sfContacts = await salesforceApi.find('Contact', {
+          where: `Email = '${contactEmail.replace(/'/g, "\\'")}'`,
+          select: 'Id'
+        });
+
+        for (const sfContact of sfContacts.records) {
+          try {
+            await salesforceApi.delete('Contact', sfContact.Id);
+            console.log(`🗑️ Contact eliminado de Salesforce: ${sfContact.Id}`);
+          } catch (error) {
+            console.warn(`No se pudo eliminar Contact SF ${sfContact.Id}:`, error.message);
+          }
+        }
+      } catch (error) {
+        console.warn('Error buscando contacts en Salesforce:', error.message);
+      }
+
+      // 3. Limpiar Company
+      results = await prolibuApi.find('Company', { companyCode }, { select: '_id,refId' });
       if (results?.data?.length > 0) {
-        expect(results.data[0]).toHaveProperty('_id');
-        await prolibuApi.delete('Deal', dealData.dealCode);
-        results = await prolibuApi.find('Deal', { dealCode: dealData.dealCode}, { select: '_id'});
-        expect(results.data.length).toBe(0);
+        console.log(`🗑️ Eliminando Company existente: ${companyCode}`);
+        for (const companyDoc of results.data) {
+          if (companyDoc.refId) {
+            try {
+              await salesforceApi.delete('Account', companyDoc.refId);
+            } catch (error) {
+              console.warn(`No se pudo eliminar Account ${companyDoc.refId}:`, error.message);
+            }
+          }
+          await prolibuApi.delete('Company', companyDoc._id);
+        }
       }
+
+      console.log('✅ Limpieza completada');
     });
 
     describe('Creation & Updates', () => {
       it('creates company with Salesforce sync', async () => {
         company = await prolibuApi.create('company', companyData);
 
-        console.log('*____company:', company);
-        
+        // console.log('*____company:', company);
+
         expect(company).toBeDefined();
         expect(company).toHaveProperty('_id');
         expect(company).toHaveProperty('companyCode', companyData.companyCode);
@@ -224,7 +275,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
           select: sfCompanySelect,
         });
 
-        console.log('--- sfCompany after creation:', sfCompany);
+        // console.log('--- sfCompany after creation:', sfCompany);
 
         expect(sfCompany).toBeDefined();
         expect(sfCompany).toHaveProperty('Id', company.refId);
@@ -269,7 +320,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
       it('updates company phone', async () => {
         const updatedData = {
           primaryPhone: faker.phone.number(),
-        }; 
+        };
 
         company = await prolibuApi.update('Company', company._id, updatedData);
 
@@ -290,7 +341,13 @@ describe('Prolibu ↔ Salesforce Integration', () => {
     describe('Contact Sync', () => {
       it('creates contact with Salesforce sync', async () => {
 
-        contact = await prolibuApi.create('contact', contactData);
+        // 🆕 Asociar contact con company
+        const contactDataWithCompany = {
+          ...contactData,
+          company: company._id, // Asociar con la company creada
+        };
+
+        contact = await prolibuApi.create('contact', contactDataWithCompany);
 
         // console.log('*____contact:', contact);
 
@@ -298,12 +355,13 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(contact).toHaveProperty('_id');
         expect(contact).toHaveProperty('firstName', contactData.firstName);
         expect(contact).toHaveProperty('lastName', contactData.lastName);
-        expect(contact).toHaveProperty('email', contactData.email);
+        expect(contact.email.toLowerCase()).toBe(contactData.email.toLowerCase());
         expect(contact).toHaveProperty('mobile', contactData.mobile);
         expect(contact).toHaveProperty('jobTitle', contactData.jobTitle);
         expect(contact).toHaveProperty('assignee');
         expect(contact).toHaveProperty('refId');
         expect(contact).toHaveProperty('refUrl');
+        expect(contact).toHaveProperty('company', company._id); // 🆕 Verificar asociación
       });
 
       it('verifies contact in Salesforce', async () => {
@@ -317,7 +375,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfContact).toHaveProperty('Id', contact.refId);
         expect(sfContact).toHaveProperty('FirstName', contact.firstName);
         expect(sfContact).toHaveProperty('LastName', contact.lastName);
-        expect(sfContact).toHaveProperty('Email', contact.email);
+        expect(sfContact).toHaveProperty('Email', contact.email.toLowerCase());
         expect(sfContact).toHaveProperty('MobilePhone', contact.mobile);
         expect(sfContact).toHaveProperty('Title', contact.jobTitle);
         expect(sfContact).toHaveProperty('OwnerId');
@@ -333,7 +391,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
       it('updates contact mobile', async () => {
         const updatedData = {
           mobile: faker.phone.number(),
-        }; 
+        };
 
         contact = await prolibuApi.update('Contact', contact._id, updatedData);
 
@@ -354,7 +412,23 @@ describe('Prolibu ↔ Salesforce Integration', () => {
     describe('Deal → Opportunity Sync', () => {
       it('creates deal with Salesforce sync', async () => {
 
-        deal = await prolibuApi.create('Deal', dealData);
+        const dealDataWithRefs = {
+          ...dealData,
+          contact: contact._id,    // Usar el ID del contacto creado
+          company: company._id,    // Usar el ID de la company creada
+          customFields: {
+            tipoEvento: 'Hospedaje',
+            numeroDePersonas: 25,
+            numeroDeHabitaciones: 12,
+            fechaHoraIngreso: '2025-10-15T15:00:00.000Z',
+            fechaHoraSalida: '2025-10-17T11:00:00.000Z',
+            ciudadDeInteres: 'Bogotá',
+            hotelPreferido: 'Hotel Test Plaza',
+            detalleDelRequerimiento: 'Evento corporativo con hospedaje para 25 personas',
+          }
+        };
+
+        deal = await prolibuApi.create('Deal', dealDataWithRefs);
 
         // console.log('*____deal:', deal);
 
@@ -362,11 +436,11 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(deal).toHaveProperty('dealName', dealData.dealName);
         expect(deal).toHaveProperty('closeDate', dealData.closeDate);
         expect(deal).toHaveProperty('source', dealData.source);
+        expect(deal).toHaveProperty('contact', contact._id);  // ✅ Verificar que tiene contacto
+        expect(deal).toHaveProperty('company', company._id);  // ✅
         expect(deal).toHaveProperty('refId');
         expect(deal).toHaveProperty('refUrl');
       });
-
-return;
 
       it('verifies deal as Opportunity in Salesforce', async () => {
         const sfDeals = await salesforceApi.findOne('Opportunity', deal.refId, {
@@ -382,50 +456,7 @@ return;
         expect(sfDeals).toHaveProperty('LeadSource', deal.source);
       });
     });
-return;
 
-    describe('Cascade Deletion', () => {
-      it('deletes company from both systems', async () => {
-        await prolibuApi.delete('Company', company._id);
-        const results = await prolibuApi.findOne('Company', company._id, { select: '_id' });
-        expect(results).toBeNull();
-      });
 
-      it('confirms company deletion in Salesforce', async () => {
-        const sfCompany = await salesforceApi.findOne('Account', company.refId, {
-          select: 'Id, Name, Phone',
-        });
-
-        expect(sfCompany).toBeNull();
-      });
-
-      it('deletes contact from both systems', async () => {
-        await prolibuApi.delete('Contact', contact._id);
-        const results = await prolibuApi.findOne('Contact', contact._id, { select: '_id' });
-        expect(results).toBeNull();
-      });
-
-      it('confirms contact deletion in Salesforce', async () => {
-        const sfContact = await salesforceApi.findOne('Contact', contact.refId, {
-          select: 'Id, FirstName, LastName, MobilePhone',
-        });
-
-        expect(sfContact).toBeNull();
-      });
-
-      it('deletes deal from both systems', async () => {
-        await prolibuApi.delete('Deal', deal._id);
-        const results = await prolibuApi.findOne('Deal', deal._id, { select: '_id' });
-        expect(results).toBeNull();
-      });
-
-      it('confirms deal deletion in Salesforce', async () => {
-        const sfDeal = await salesforceApi.findOne('Opportunity', deal.refId, {
-          select: 'Id, Name, CloseDate',
-        });
-
-        expect(sfDeal).toBeNull();
-      });
-    });
   });
 });

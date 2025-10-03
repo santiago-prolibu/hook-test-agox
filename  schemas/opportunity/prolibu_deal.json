@@ -1,0 +1,509 @@
+{
+    "_id": {
+        "type": "objectid",
+        "avoid": "update",
+        "hidden": true,
+        "description": "The date and time the document was created."
+    },
+    "createdAt": {
+        "type": "date",
+        "avoid": "always",
+        "description": "The date and time the document was created."
+    },
+    "updatedAt": {
+        "type": "date",
+        "avoid": "always",
+        "description": "The date and time the document was last updated."
+    },
+    "createdBy": {
+        "type": "objectid",
+        "required": true,
+        "ref": "User",
+        "avoid": "always",
+        "description": "The user who created the document."
+    },
+    "updatedBy": {
+        "type": "objectid",
+        "required": true,
+        "ref": "User",
+        "avoid": "always",
+        "description": "The user who last updated the document."
+    },
+    "workspace": {
+        "type": "objectid",
+        "ref": "Workspace",
+        "hidden": true,
+        "description": "The workspace the document belongs to."
+    },
+    "refId": {
+        "type": "mixed",
+        "hidden": true
+    },
+    "refUrl": {
+        "type": "string",
+        "hidden": true
+    },
+    "dealCode": {
+        "type": "string",
+        "required": true,
+        "unique": true,
+        "hidden": true,
+        "description": "Unique keyname used as ID",
+        "primaryKey": true
+    },
+    "dealName": {
+        "type": "string",
+        "required": true,
+        "displayName": true
+    },
+    "contact": {
+        "type": "objectid",
+        "required": true,
+        "ref": "Contact",
+        "isCustomField": true
+    },
+    "company": {
+        "type": "objectid",
+        "ref": "Company",
+        "avoid": "always"
+    },
+    "closeDate": {
+        "type": "date"
+    },
+    "proposal": {
+        "enabled": {
+            "type": "boolean",
+            "description": "Enable proposal formualtion for this deal"
+        },
+        "createdAt": {
+            "type": "date",
+            "avoid": "always"
+        },
+        "formulationTime": {
+            "type": "number",
+            "description": "Tracks the cumulative time spent editing the proposal."
+        },
+        "title": {
+            "type": "string",
+            "displayName": true
+        },
+        "quote": {
+            "type": "mixed",
+            "uiCom": "QuoteEditor",
+            "description": "The quote to be included in the proposal."
+        },
+        "template": {
+            "layout": {
+                "type": "objectid",
+                "ref": "ContentTemplate",
+                "description": "Select the layout template to apply to the proposal.",
+                "xquery": {
+                    "templateType": "layout"
+                }
+            },
+            "layoutHtml": {
+                "type": "string",
+                "hidden": true
+            },
+            "snippetHtml": {
+                "type": "string",
+                "hidden": true
+            },
+            "customContent": {
+                "type": "mixed",
+                "uiCom": "TemplateEditor",
+                "description": "Append custom content to the proposal."
+            },
+            "customContentHtml": {
+                "type": "string",
+                "hidden": true
+            },
+            "assets": {
+                "type": [
+                    "objectid"
+                ],
+                "ref": "File",
+                "hidden": true,
+                "isPublic": true
+            },
+            "defaultFont": {
+                "type": "string",
+                "hidden": true,
+                "isPublic": true,
+                "description": "The default font of the template"
+            },
+            "secondaryFont": {
+                "type": "string",
+                "hidden": true,
+                "isPublic": true,
+                "description": "The default font of the template"
+            },
+            "embeddedFonts": {
+                "type": [
+                    "objectid"
+                ],
+                "ref": "File",
+                "hidden": true,
+                "isPublic": true
+            },
+            "language": {
+                "type": "string",
+                "enum": [
+                    "ar",
+                    "zh",
+                    "zh-TW",
+                    "cs",
+                    "da",
+                    "nl",
+                    "en",
+                    "fi",
+                    "fr",
+                    "de",
+                    "el",
+                    "hi",
+                    "hu",
+                    "id",
+                    "it",
+                    "ja",
+                    "ko",
+                    "ms",
+                    "no",
+                    "pl",
+                    "pt",
+                    "ro",
+                    "ru",
+                    "es",
+                    "sv",
+                    "th",
+                    "tr",
+                    "uk",
+                    "vi"
+                ],
+                "hidden": true
+            }
+        },
+        "attachments": {
+            "type": [
+                "objectid"
+            ],
+            "ref": "File",
+            "isPublic": true,
+            "thumbnailPreview": true
+        },
+        "expirationDate": {
+            "type": "date",
+            "description": "Proposal expiration date."
+        },
+        "unpublishedDate": {
+            "type": "date",
+            "description": "Proposal inaccessible date."
+        }
+    },
+    "proposalVersions": {
+        "refs": {
+            "type": [
+                "objectid"
+            ],
+            "ref": "ProposalVersion",
+            "hidden": true
+        },
+        "details": {
+            "type": [
+                "mixed"
+            ],
+            "hidden": true,
+            "objectShape": {
+                "id": {
+                    "type": "string"
+                },
+                "versionName": {
+                    "type": "string"
+                },
+                "visibleToClient": {
+                    "type": "boolean"
+                },
+                "isAutoGenerated": {
+                    "type": "boolean"
+                },
+                "createdAt": {
+                    "type": "date"
+                },
+                "creator": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                }
+            }
+        },
+        "restorationPoint": {
+            "type": "objectid",
+            "ref": "ProposalVersion",
+            "hidden": true
+        }
+    },
+    "thumbnail": {
+        "type": "objectid",
+        "ref": "File",
+        "hidden": true,
+        "isPublic": true
+    },
+    "adCampaign": {
+        "type": "objectid",
+        "ref": "AdCampaign",
+        "description": "Campaign where the entry was obtained from."
+    },
+    "source": {
+        "type": "string",
+        "description": "Source where the entry was obtained from."
+    },
+    "tags": {
+        "type": [
+            "objectid"
+        ],
+        "ref": "Tag",
+        "uiCom": "TagsCom"
+    },
+    "group": {
+        "type": "objectid",
+        "ref": "Group"
+    },
+    "assignee": {
+        "type": "objectid",
+        "ref": "User"
+    },
+    "collaborators": {
+        "type": [
+            "objectid"
+        ],
+        "ref": "User"
+    },
+    "notes": {
+        "type": [
+            "objectid"
+        ],
+        "ref": "Note",
+        "avoid": "always",
+        "uiCom": "NotesCom"
+    },
+    "tasks": {
+        "type": [
+            "objectid"
+        ],
+        "ref": "Task",
+        "avoid": "always",
+        "uiCom": "TasksCom"
+    },
+    "stage": {
+        "type": "objectid",
+        "ref": "Stage"
+    },
+    "stageMovedAt": {
+        "type": "date",
+        "avoid": "always"
+    },
+    "priority": {
+        "type": "objectid",
+        "ref": "Stage"
+    },
+    "pipelineStages": {
+        "type": "mixed",
+        "hidden": true,
+        "objectShape": {
+            "index": {
+                "type": "number"
+            },
+            "movedAt": {
+                "type": "date"
+            },
+            "movedBy": {
+                "type": "string"
+            }
+        }
+    },
+    "tracking": {
+        "heat": {
+            "type": "string",
+            "enum": [
+                "Cold",
+                "Warm",
+                "Hot"
+            ],
+            "default": "Cold",
+            "avoid": "always",
+            "description": "Indicates the level of interest based on interaction metrics: Cold, Warm, Hot"
+        },
+        "engagement": {
+            "type": "number",
+            "avoid": "always",
+            "description": "Engagement score based on interaction metrics"
+        },
+        "lastSeenAt": {
+            "type": "date",
+            "avoid": "always",
+            "description": "Date time when the document was last viewed"
+        },
+        "totalViews": {
+            "type": "number",
+            "avoid": "always",
+            "description": "Total number of views the presentation has received"
+        },
+        "views": {
+            "type": [
+                "mixed"
+            ],
+            "avoid": "always",
+            "objectShape": {
+                "trackId": {
+                    "type": "string",
+                    "description": "Unique identifier for the view"
+                },
+                "contact": {
+                    "type": "object",
+                    "description": "Reference to the contact"
+                },
+                "openedAt": {
+                    "type": "date",
+                    "description": "Date and time when the view occurred"
+                },
+                "lastSeenAt": {
+                    "type": "date",
+                    "description": "Date and time of the last interaction with the view"
+                },
+                "viewDuration": {
+                    "type": "number",
+                    "description": "Duration of the view in milliseconds"
+                },
+                "retakes": {
+                    "type": "number",
+                    "description": "Number of times the view was retaken"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "agent": {
+                    "os": {
+                        "type": "string"
+                    },
+                    "browser": {
+                        "type": "string"
+                    },
+                    "device": {
+                        "type": "string"
+                    }
+                },
+                "localtion": {
+                    "country": {
+                        "type": "string"
+                    },
+                    "regionName": {
+                        "type": "string"
+                    },
+                    "city": {
+                        "type": "string"
+                    },
+                    "isp": {
+                        "type": "string"
+                    }
+                }
+            },
+            "description": "Details of each view of the presentation"
+        }
+    },
+    "meta": {
+        "type": "mixed",
+        "hidden": true
+    },
+    "deniedReason": {
+        "type": "string",
+        "hidden": true
+    },
+    "otherDeniedReason": {
+        "type": "string",
+        "hidden": true
+    },
+    "proposalWizard": {
+        "type": "objectid",
+        "ref": "ProposalWizard",
+        "hidden": true,
+        "description": "The proposal wizard used to create this deal."
+    },
+    "invoices": {
+        "type": [
+            "objectid"
+        ],
+        "ref": "Invoice",
+        "avoid": "always"
+    },
+    "customFields": {
+        "tipoEvento": {
+            "type": "string",
+            "enum": [
+                "Hospedaje",
+                "Evento",
+                "Hospedaje + Evento",
+                "Evento Interno"
+            ],
+            "isCustomField": true
+        },
+        "detalleDelRequerimiento": {
+            "type": "string",
+            "isCustomField": true
+        },
+        "mes": {
+            "type": "string",
+            "enum": [
+                "Enero",
+                "Febrero",
+                "Marzo",
+                "Abril",
+                "Mayo",
+                "Junio",
+                "Julio",
+                "Agosto",
+                "Septiembre",
+                "Octubre",
+                "Noviembre",
+                "Diciembre"
+            ],
+            "isCustomField": true
+        },
+        "año": {
+            "type": "string",
+            "enum": [
+                "2025",
+                "2026",
+                "2027",
+                "2028",
+                "2029",
+                "2030",
+                "2031",
+                "2032",
+                "2033",
+                "2034",
+                "2035"
+            ],
+            "isCustomField": true
+        },
+        "fechaHoraIngreso": {
+            "type": "date",
+            "uiCom": "DateTime",
+            "isCustomField": true
+        },
+        "fechaHoraSalida": {
+            "type": "date",
+            "uiCom": "DateTime",
+            "isCustomField": true
+        },
+        "numeroDePersonas": {
+            "type": "number",
+            "uiCom": "Number",
+            "isCustomField": true
+        },
+        "numeroDeNoches": {
+            "type": "number",
+            "uiCom": "Number",
+            "isCustomField": true
+        }
+    }
+}
