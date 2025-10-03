@@ -245,46 +245,267 @@ var require_EventManager = __commonJS({
   }
 });
 
+// lib/vendors/prolibu/ConfigValidator.js
+var require_ConfigValidator = __commonJS({
+  "lib/vendors/prolibu/ConfigValidator.js"(exports2, module2) {
+    var ConfigValidator = class {
+      /**
+       * Schema definition for object configuration
+       */
+      static CONFIG_SCHEMA = {
+        source: { type: "string", required: true },
+        target: { type: "string", required: true },
+        active: { type: "boolean", default: true },
+        map: { type: "object", required: true },
+        globalTransforms: { type: "object", default: {} },
+        globalAfterTransforms: { type: "object", default: {} },
+        globalPreMapping: { type: "function", default: null },
+        globalPostMapping: { type: "function", default: null },
+        events: {
+          type: "array",
+          required: true,
+          items: {
+            name: { type: "string", required: true, enum: ["afterCreate", "afterUpdate", "afterDelete"] },
+            handler: { type: "function", required: true },
+            transforms: { type: "object", default: {} },
+            afterTransforms: { type: "object", default: {} },
+            preMapping: { type: "function", default: null },
+            postMapping: { type: "function", default: null }
+          }
+        }
+      };
+      /**
+       * Validates an array of object configurations
+       * @param {Array} configs - Array of object configurations
+       * @returns {Array} - Validated and normalized configurations
+       * @throws {Error} - If validation fails
+       */
+      static validateConfigs(configs) {
+        if (!Array.isArray(configs)) {
+          throw new Error("ConfigValidator: configs must be an array");
+        }
+        if (configs.length === 0) {
+          throw new Error("ConfigValidator: configs array cannot be empty");
+        }
+        return configs.map((config, index) => {
+          try {
+            return this.validateConfig(config);
+          } catch (error) {
+            throw new Error(`ConfigValidator: Error in config[${index}] (${config.source || "unknown"}): ${error.message}`);
+          }
+        });
+      }
+      /**
+       * Validates a single object configuration
+       * @param {Object} config - Object configuration
+       * @returns {Object} - Validated and normalized configuration
+       * @throws {Error} - If validation fails
+       */
+      static validateConfig(config) {
+        if (!config || typeof config !== "object") {
+          throw new Error("Config must be a valid object");
+        }
+        const validated = {};
+        for (const [key, schema] of Object.entries(this.CONFIG_SCHEMA)) {
+          if (key === "events") continue;
+          const value = config[key];
+          if (schema.required && (value === void 0 || value === null)) {
+            throw new Error(`Required field '${key}' is missing`);
+          }
+          if (value !== void 0) {
+            this.validateType(value, schema, key);
+            validated[key] = value;
+          } else if (schema.default !== void 0) {
+            validated[key] = schema.default;
+          }
+        }
+        if (!config.events || !Array.isArray(config.events)) {
+          throw new Error("events must be an array");
+        }
+        if (config.events.length === 0) {
+          throw new Error("events array cannot be empty");
+        }
+        validated.events = config.events.map((event, eventIndex) => {
+          try {
+            return this.validateEvent(event);
+          } catch (error) {
+            throw new Error(`Error in events[${eventIndex}]: ${error.message}`);
+          }
+        });
+        const eventNames = validated.events.map((e) => e.name);
+        const duplicates = eventNames.filter((name, index) => eventNames.indexOf(name) !== index);
+        if (duplicates.length > 0) {
+          throw new Error(`Duplicate event names found: ${duplicates.join(", ")}`);
+        }
+        return validated;
+      }
+      /**
+       * Validates a single event configuration
+       * @param {Object} event - Event configuration
+       * @returns {Object} - Validated and normalized event
+       * @throws {Error} - If validation fails
+       */
+      static validateEvent(event) {
+        if (!event || typeof event !== "object") {
+          throw new Error("Event must be a valid object");
+        }
+        const validated = {};
+        const eventSchema = this.CONFIG_SCHEMA.events.items;
+        for (const [key, schema] of Object.entries(eventSchema)) {
+          const value = event[key];
+          if (schema.required && (value === void 0 || value === null)) {
+            throw new Error(`Required field '${key}' is missing`);
+          }
+          if (value !== void 0) {
+            this.validateType(value, schema, key);
+            validated[key] = value;
+          } else if (schema.default !== void 0) {
+            validated[key] = schema.default;
+          }
+        }
+        return validated;
+      }
+      /**
+       * Validates value type against schema
+       * @param {*} value - Value to validate
+       * @param {Object} schema - Schema definition
+       * @param {string} fieldName - Field name for error messages
+       * @throws {Error} - If validation fails
+       */
+      static validateType(value, schema, fieldName) {
+        switch (schema.type) {
+          case "string":
+            if (typeof value !== "string") {
+              throw new Error(`Field '${fieldName}' must be a string`);
+            }
+            if (schema.enum && !schema.enum.includes(value)) {
+              throw new Error(`Field '${fieldName}' must be one of: ${schema.enum.join(", ")}`);
+            }
+            break;
+          case "boolean":
+            if (typeof value !== "boolean") {
+              throw new Error(`Field '${fieldName}' must be a boolean`);
+            }
+            break;
+          case "object":
+            if (typeof value !== "object" || value === null || Array.isArray(value)) {
+              throw new Error(`Field '${fieldName}' must be an object`);
+            }
+            break;
+          case "function":
+            if (typeof value !== "function") {
+              throw new Error(`Field '${fieldName}' must be a function`);
+            }
+            break;
+          case "array":
+            if (!Array.isArray(value)) {
+              throw new Error(`Field '${fieldName}' must be an array`);
+            }
+            break;
+          default:
+            throw new Error(`Unknown type '${schema.type}' for field '${fieldName}'`);
+        }
+      }
+      /**
+       * Resolves transforms for a specific event by merging global and event-specific transforms
+       * Priority: event transforms override global transforms
+       * @param {Object} config - Object configuration
+       * @param {Object} event - Event configuration
+       * @returns {Object} - { transforms, afterTransforms }
+       */
+      static resolveTransforms(config, event) {
+        const transforms = {
+          // If event has transforms defined, use only those (override strategy)
+          // If event.transforms is empty object, use globalTransforms
+          ...Object.keys(event.transforms || {}).length > 0 ? event.transforms : config.globalTransforms
+        };
+        const afterTransforms = {
+          // Same strategy for afterTransforms
+          ...Object.keys(event.afterTransforms || {}).length > 0 ? event.afterTransforms : config.globalAfterTransforms
+        };
+        return { transforms, afterTransforms };
+      }
+    };
+    module2.exports = ConfigValidator;
+  }
+});
+
 // lib/vendors/prolibu/OutboundIntegration.js
 var require_OutboundIntegration = __commonJS({
   "lib/vendors/prolibu/OutboundIntegration.js"(exports2, module2) {
     var Events = require_EventManager();
+    var ConfigValidator = require_ConfigValidator();
     var OutboundIntegration2 = class {
-      constructor(config = {}) {
-        this.config = config;
-        this.validateConfig();
+      constructor(configs = []) {
+        this.configs = configs;
+        this.validateConfigs();
       }
-      validateConfig() {
-        if (!this.config || Object.keys(this.config).length === 0) {
-          throw new Error("Configuration is required");
+      /**
+       * Validates the array-based configuration using ConfigValidator
+       */
+      validateConfigs() {
+        if (!Array.isArray(this.configs)) {
+          throw new Error("OutboundIntegration: Configuration must be an array");
+        }
+        try {
+          this.validatedConfigs = ConfigValidator.validateConfigs(this.configs);
+        } catch (error) {
+          throw new Error(`OutboundIntegration validation failed: ${error.message}`);
         }
       }
+      /**
+       * Registers events for all configurations
+       */
       async registerEvents() {
-        const integratedObjects = Object.keys(this.config);
-        for (let i = 0; i < integratedObjects.length; i++) {
-          const objectName = integratedObjects[i];
-          const config = this.config[objectName];
+        for (const config of this.validatedConfigs) {
           if (!config.active) {
             continue;
           }
-          config.mapToObject = config.mapToObject || objectName;
-          config.additionalTransforms = config.additionalTransforms || {};
-          if (config.events && typeof config.events !== "object") {
-            throw new Error(`'events' key in config for '${objectName}' must be an object.`);
-          }
-          const eventNames = Object.keys(config.events);
-          for (let j = 0; j < eventNames.length; j++) {
-            const event = eventNames[j];
-            const eventHandler = config.events[event];
-            if (typeof eventHandler !== "function") {
-              throw new Error(`Event handler for '${event}' in config for '${objectName}' must be a function.`);
+          for (const event of config.events) {
+            const eventName2 = `${config.source}.${event.name}`;
+            if (typeof event.handler !== "function") {
+              throw new Error(`Event handler for '${eventName2}' must be a function`);
             }
-            Events.on(event, async () => {
-              await eventHandler(objectName, config);
+            Events.on(eventName2, async () => {
+              try {
+                await event.handler(config.source, config, event);
+              } catch (error) {
+                console.error(`\u274C Error in event handler for '${eventName2}':`, error.message);
+                throw error;
+              }
             });
           }
         }
       }
+      /**
+       * Gets configuration for a specific source object
+       * @param {string} source - Source object name
+       * @returns {Object|null} - Configuration object or null if not found
+       */
+      getConfig(source) {
+        return this.validatedConfigs.find((config) => config.source === source) || null;
+      }
+      /**
+       * Gets event configuration for a specific source object and event name
+       * @param {string} source - Source object name
+       * @param {string} eventName - Event name (e.g., 'afterCreate')
+       * @returns {Object|null} - Event configuration or null if not found
+       */
+      getEventConfig(source, eventName2) {
+        const config = this.getConfig(source);
+        if (!config) return null;
+        return config.events.find((event) => event.name === eventName2) || null;
+      }
+      /**
+       * Lists all active configurations
+       * @returns {Array} - Array of active configurations
+       */
+      getActiveConfigs() {
+        return this.validatedConfigs.filter((config) => config.active);
+      }
+      /**
+       * Initializes the outbound integration system
+       */
       async initialize() {
         await this.registerEvents();
         await Events.init();
@@ -297,16 +518,62 @@ var require_OutboundIntegration = __commonJS({
 // lib/vendors/prolibu/DataMapper.js
 var require_DataMapper = __commonJS({
   "lib/vendors/prolibu/DataMapper.js"(exports2, module2) {
+    var ConfigValidator = require_ConfigValidator();
     var DataMapper2 = class {
       /**
-       * Maps data using a mapping dictionary (supports both sync and async transforms)
+       * Maps data using array-based configuration format with resolved transforms
        * @param {Object} options - Mapping options
        * @param {Object} options.data - Data to map
-       * @param {Object} options.map - Mapping dictionary
-       * @param {boolean} options.reverse - If true, reverses mapping (value → key), if false (default) uses (key → value)
-       * @param {Object} options.transforms - Additional transforms to concatenate with map transforms
-       * @param {Object} options.afterTransforms - Post-processing transforms applied after main mapping (supports async)
-       * @returns {Object|Promise<Object>} - Mapped object (Promise if any transform is async)
+       * @param {Object} options.config - Object configuration (from array format)
+       * @param {Object} options.event - Event configuration
+       * @param {boolean} options.reverse - If true, reverses mapping
+       * @returns {Object|Promise<Object>} - Mapped object
+       */
+      static async mapWithConfig({ data, config, event, reverse = false } = {}) {
+        if (!config || !event) {
+          throw new Error("DataMapper.mapWithConfig: config and event are required");
+        }
+        if (config.globalPreMapping && typeof config.globalPreMapping === "function") {
+          try {
+            await config.globalPreMapping(data, config, event);
+          } catch (error) {
+            console.error("\u274C globalPreMapping error:", error);
+          }
+        }
+        if (event.preMapping && typeof event.preMapping === "function") {
+          try {
+            await event.preMapping(data, config, event);
+          } catch (error) {
+            console.error("\u274C preMapping error:", error);
+          }
+        }
+        const { transforms, afterTransforms } = ConfigValidator.resolveTransforms(config, event);
+        const mappedData = await this._processMapping({
+          data,
+          map: config.map,
+          reverse,
+          transforms,
+          afterTransforms
+        });
+        if (event.postMapping && typeof event.postMapping === "function") {
+          try {
+            await event.postMapping(data, config, event, mappedData);
+          } catch (error) {
+            console.error("\u274C postMapping error:", error);
+          }
+        }
+        if (config.globalPostMapping && typeof config.globalPostMapping === "function") {
+          try {
+            await config.globalPostMapping(data, config, event, mappedData);
+          } catch (error) {
+            console.error("\u274C globalPostMapping error:", error);
+          }
+        }
+        return mappedData;
+      }
+      /**
+       * Legacy map method for backward compatibility
+       * @deprecated Use mapWithConfig for new array-based configurations
        */
       static map({ data, map, reverse = false, transforms = {}, afterTransforms = {} } = {}) {
         return this._processMapping({ data, map, reverse, transforms, afterTransforms });
@@ -502,7 +769,7 @@ var require_DataMapper = __commonJS({
           resolvedAfterResults = afterResults;
         }
         resolvedAfterResults.forEach(({ fieldPath, value, type }) => {
-          if (type === "success") {
+          if (type === "success" && value !== void 0) {
             this.setNestedValue(mappedResult, fieldPath, value);
           }
         });
@@ -568,15 +835,14 @@ var require_SalesforceApi = __commonJS({
       throw salesforceError;
     }
     var SalesforceApi2 = class {
-      constructor({ instanceUrl, customerKey, customerSecret, apiVersion = "58.0", sandbox = false, env: env2 = "default" } = {}) {
+      constructor({ instanceUrl, customerKey, customerSecret, apiVersion = "58.0" } = {}) {
         if (!instanceUrl) throw new Error("instanceUrl is required");
         if (!customerKey) throw new Error("customerKey is required");
         if (!customerSecret) throw new Error("customerSecret is required");
         this.customerKey = customerKey;
         this.customerSecret = customerSecret;
         this.apiVersion = apiVersion;
-        this.sandbox = sandbox;
-        this.tokenKey = `salesforce-token-${env2}`;
+        this.tokenKey = `salesforce-token-${env}`;
         this.isServerEnvironment = typeof globalThis.setVariable === "function" && typeof globalThis.variables !== "undefined";
         if (this.isServerEnvironment) {
           const tokenFound = globalThis.variables.find((v) => v.key === this.tokenKey);
@@ -746,6 +1012,21 @@ var require_SalesforceApi = __commonJS({
           isValid: timeUntilExpiration > this.TOKEN_REFRESH_BUFFER
         };
       }
+      getRefUrl(objectName, docId) {
+        return `https://${this.instanceUrl}/lightning/r/${objectName}/${docId}/view`;
+      }
+      getRefData(objectName, docId) {
+        if (!objectName) {
+          throw new Error('"objectName" is required to get refData');
+        }
+        if (!docId) {
+          throw new Error('"docId" is required to get refData');
+        }
+        return {
+          refId: docId,
+          refUrl: this.getRefUrl(objectName, docId)
+        };
+      }
       /**
        * Creates a new Salesforce record
        * 
@@ -864,17 +1145,43 @@ var require_SalesforceApi = __commonJS({
           if (!this.authenticated) {
             await this.authenticate();
           }
-          for (const key of ["select", "where", "orderBy", "limit"]) {
+          for (const key of ["select", "orderBy", "limit"]) {
             if (options[key] !== void 0 && typeof options[key] !== "string" && typeof options[key] !== "number") {
               throw new Error(`Invalid type for option "${key}". Expected string or number.`);
             }
+          }
+          if (options.where !== void 0 && typeof options.where !== "string" && typeof options.where !== "object") {
+            throw new Error(`Invalid type for option "where". Expected string or object.`);
           }
           let select = options.select || "Id";
           if (typeof select === "string") {
             select = select.replace(/\s+/g, ",").replace(/,+/g, ",");
           }
           let soql = `SELECT ${select} FROM ${sobjectType}`;
-          if (options.where) soql += ` WHERE ${options.where}`;
+          if (options.where) {
+            if (typeof options.where === "object") {
+              const conditions = Object.entries(options.where).map(([field, value]) => {
+                if (value === null || value === void 0) {
+                  return `${field} = null`;
+                } else if (typeof value === "string") {
+                  const escapedValue = value.replace(/'/g, "\\'");
+                  return `${field} = '${escapedValue}'`;
+                } else if (typeof value === "boolean") {
+                  return `${field} = ${value}`;
+                } else if (typeof value === "number") {
+                  return `${field} = ${value}`;
+                } else {
+                  const escapedValue = String(value).replace(/'/g, "\\'");
+                  return `${field} = '${escapedValue}'`;
+                }
+              });
+              if (conditions.length > 0) {
+                soql += ` WHERE ${conditions.join(" AND ")}`;
+              }
+            } else if (typeof options.where === "string") {
+              soql += ` WHERE ${options.where}`;
+            }
+          }
           if (options.orderBy) soql += ` ORDER BY ${options.orderBy}`;
           if (options.limit) soql += ` LIMIT ${options.limit}`;
           const response = await this.axios.get(`/services/data/v${this.apiVersion}/query?q=${encodeURIComponent(soql)}`, {
@@ -1145,8 +1452,8 @@ var require_ProlibuApi = __commonJS({
         }
       }
       async findOne(modelName, id, queryParams = {}) {
+        validateId(id);
         try {
-          validateId(id);
           stringify(queryParams, "populatePath");
           const queryString = new URLSearchParams(queryParams).toString();
           const response = await this.axios.get(`${this.prefix}/${modelName}/${id}?${queryString}`);
@@ -1170,8 +1477,8 @@ var require_ProlibuApi = __commonJS({
         }
       }
       async update(modelName, id, data) {
+        validateId(id);
         try {
-          validateId(id);
           const response = await this.axios.patch(`${this.prefix}/${modelName}/${id}`, data);
           return response.data;
         } catch (err) {
@@ -1179,8 +1486,8 @@ var require_ProlibuApi = __commonJS({
         }
       }
       async delete(modelName, id) {
+        validateId(id);
         try {
-          validateId(id);
           const response = await this.axios.delete(`${this.prefix}/${modelName}/${id}`);
           return response.data;
         } catch (err) {
@@ -1782,7 +2089,9 @@ var require_DealMap = __commonJS({
       contact: "ContactId",
       company: "AccountId",
       stage: "StageName",
-      source: "LeadSource"
+      source: "LeadSource",
+      "proposal.quote.total": "Amount",
+      "proposal.quote.quoteCurrency": "CurrencyIsoCode"
       // Additional mappings
       // 'proposal.title': 'Description',
       /*
@@ -1919,7 +2228,7 @@ var require_DealMap = __commonJS({
   }
 });
 
-// accounts/dev11.prolibu.com/test-agox/code.js
+// accounts/dev11.prolibu.com/test-agox/index.js
 var OutboundIntegration = require_OutboundIntegration();
 var DataMapper = require_DataMapper();
 var SalesforceApi = require_SalesforceApi();
@@ -1931,58 +2240,94 @@ var vars = getRequiredVars({
   salesforceCustomerSecret: `salesforce-customerSecret-${env}`,
   prolibuApiKey: `prolibu-apiKey-${env}`
 });
-(async function() {
-  const prolibuApi = new ProlibuApi({ apiKey: vars.prolibuApiKey });
-  const salesforceApi = new SalesforceApi({
-    instanceUrl: vars.salesforceInstanceUrl,
-    customerKey: vars.salesforceCustomerKey,
-    customerSecret: vars.salesforceCustomerSecret
-  });
-  async function afterCreateWithDuplicateHandling(objectName, config) {
+var prolibuApi = new ProlibuApi({ apiKey: vars.prolibuApiKey });
+var outboundApi = new SalesforceApi({
+  instanceUrl: vars.salesforceInstanceUrl,
+  customerKey: vars.salesforceCustomerKey,
+  customerSecret: vars.salesforceCustomerSecret
+});
+var Handlers = {
+  async afterCreate(objectName, config, event, customData = null) {
     try {
-      const data = await DataMapper.map({
-        data: eventData.doc,
-        map: config.map,
-        transforms: config.transforms,
-        afterTransforms: config.afterTransforms
+      const data = customData || eventData.doc;
+      const mappedData = await DataMapper.mapWithConfig({
+        data,
+        config,
+        event
       });
-      console.log("%c\u{1F7E2} [AGOX] data Mapeada", "color: green; font-weight: bold;", data);
+      const doc = await outboundApi.create(config.target, mappedData);
+      try {
+        const refData = outboundApi.getRefData(config.target, doc.id);
+        const updatedDoc = await prolibuApi.update(
+          objectName,
+          data._id,
+          refData
+        );
+        if (!customData) {
+          Object.assign(eventData.doc, updatedDoc);
+        }
+        return mappedData;
+      } catch (error) {
+        console.error(
+          `\u274C [DEBUG-HANDLER] Failed to update Prolibu '${objectName}' with Salesforce refId:`,
+          error
+        );
+        console.error(`\u274C [DEBUG-HANDLER] Stack:`, error.stack);
+      }
+    } catch (error) {
+      console.error(
+        `\u274C [DEBUG-HANDLER] Failed to create Salesforce '${config.target}':`,
+        error.message
+      );
+      console.error(`\u274C [DEBUG-HANDLER] Stack:`, error.stack);
+    }
+  },
+  // 🆕 Custom handler for Contact with duplicate handling
+  async afterCreateContactWithDuplicateHandling(objectName, config, event, customData = null) {
+    try {
+      const data = customData || eventData.doc;
+      const mappedData = await DataMapper.mapWithConfig({
+        data,
+        config,
+        event
+      });
+      if (!mappedData.AccountId && data.company) {
+        console.warn(
+          "\u26A0\uFE0F [DEBUG-CONTACT] ADVERTENCIA: Contact tiene company pero AccountId es undefined!"
+        );
+        console.warn(
+          "\u26A0\uFE0F [DEBUG-CONTACT] Esto significa que el transform NO se ejecut\xF3"
+        );
+        console.warn("\u26A0\uFE0F [DEBUG-CONTACT] data.company:", data.company);
+      }
       let result;
-      if (data.Email) {
-        console.log(`\u{1F50D} Buscando contact existente por email: ${data.Email}`);
+      if (mappedData.Email) {
         try {
-          const existingContacts = await salesforceApi.find("Contact", {
-            where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+          const existingContacts = await outboundApi.find("Contact", {
+            where: { Email: mappedData.Email },
             limit: 1,
             select: "Id"
           });
-          console.log(`\u{1F4CA} Encontrados: ${existingContacts.totalSize} contactos existentes`);
           if (existingContacts.totalSize > 0) {
             result = { id: existingContacts.records[0].Id };
-            console.log(`\u{1F4E7} Usando contact existente: ${result.id}`);
             try {
-              await salesforceApi.update("Contact", result.id, data);
-              console.log(`\u{1F504} Contact actualizado: ${result.id}`);
+              await outboundApi.update("Contact", result.id, mappedData);
             } catch (updateError) {
               console.warn("Error actualizando contact:", updateError.message);
             }
           } else {
-            console.log(`\u2728 Email \xFAnico, creando nuevo contact...`);
             try {
-              result = await salesforceApi.create("Contact", data);
-              console.log(`\u2705 Contact creado: ${result.id}`);
+              result = await outboundApi.create("Contact", mappedData);
             } catch (createError) {
               console.error(`\u274C Error creando:`, createError.message);
               if (createError.message?.includes("duplicate")) {
-                console.log("\u{1F504} Race condition detectada, buscando de nuevo...");
-                const retrySearch = await salesforceApi.find("Contact", {
-                  where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+                const retrySearch = await outboundApi.find("Contact", {
+                  where: { Email: mappedData.Email },
                   limit: 1,
                   select: "Id"
                 });
                 if (retrySearch.totalSize > 0) {
                   result = { id: retrySearch.records[0].Id };
-                  console.log(`\uFFFD Contact encontrado en retry: ${result.id}`);
                 } else {
                   throw createError;
                 }
@@ -1996,129 +2341,104 @@ var vars = getRequiredVars({
           throw searchError;
         }
       } else {
-        console.log("\u26A0\uFE0F Sin email, creando directamente...");
-        result = await salesforceApi.create("Contact", data);
-        console.log(`\u2705 Contact creado sin email: ${result.id}`);
+        result = await outboundApi.create("Contact", mappedData);
       }
       if (result && result.id) {
-        const refId = result.id;
-        const refUrl = `https://${vars.salesforceInstanceUrl}/lightning/r/Contact/${result.id}/view`;
-        try {
-          const updatedDoc = await prolibuApi.update(objectName, eventData.doc._id, { refId, refUrl });
+        const refData = outboundApi.getRefData("Contact", result.id);
+        const updatedDoc = await prolibuApi.update(
+          objectName,
+          data._id,
+          refData
+        );
+        if (!customData) {
           Object.assign(eventData.doc, updatedDoc);
-          console.log(`\u2705 Contact asociado con Salesforce: ${refId}`);
-        } catch (error) {
-          console.error(`Failed to update Prolibu Contact with Salesforce refId:`, error);
         }
-      } else {
-        console.error("\u274C No hay result v\xE1lido para actualizar Prolibu");
       }
+      return mappedData;
     } catch (error) {
       console.error(`Failed to create Salesforce Contact:`, error);
-      const isDuplicateError = error.message?.includes("duplicate") || error.message?.includes("ya existe") || error.message?.includes("DUPLICATE_VALUE") || error.message?.includes("creating a duplicate");
+      const isDuplicateError = error.message?.includes("duplicate") || error.message?.includes("ya existe") || error.message?.includes("DUPLICATE_VALUE");
       if (isDuplicateError) {
-        console.log("\u{1F50D} Error de duplicado detectado, buscando registro existente...");
         try {
-          const data = await DataMapper.map({
-            data: eventData.doc,
-            map: config.map,
-            transforms: config.transforms,
-            afterTransforms: config.afterTransforms
+          const data = customData || eventData.doc;
+          const mappedData = await DataMapper.mapWithConfig({
+            data,
+            config,
+            event
           });
-          console.log(`\u{1F50D} Buscando por email: ${data.Email}`);
-          if (data.Email) {
-            const existing = await salesforceApi.find("Contact", {
-              where: `Email = '${data.Email.replace(/'/g, "\\'")}'`,
+          if (mappedData.Email) {
+            const existing = await outboundApi.find("Contact", {
+              where: { Email: mappedData.Email },
               limit: 1,
               select: "Id"
             });
-            console.log(`\u{1F4CA} Resultado b\xFAsqueda fallback: ${existing.totalSize} contactos encontrados`);
             if (existing.totalSize > 0) {
-              const refId = existing.records[0].Id;
-              const refUrl = `https://${vars.salesforceInstanceUrl}/lightning/r/Contact/${refId}/view`;
-              const updatedDoc = await prolibuApi.update(objectName, eventData.doc._id, { refId, refUrl });
-              Object.assign(eventData.doc, updatedDoc);
-              console.log(`\u{1F517} Asociado con contact existente: ${refId}`);
+              const refData = outboundApi.getRefData(
+                "Contact",
+                existing.records[0].Id
+              );
+              const updatedDoc = await prolibuApi.update(
+                objectName,
+                data._id,
+                refData
+              );
+              if (!customData) {
+                Object.assign(eventData.doc, updatedDoc);
+              }
               return;
-            } else {
-              console.error("\u274C No se encontr\xF3 el contact duplicado en fallback");
             }
-          } else {
-            console.error("\u274C No hay email para buscar en fallback");
           }
         } catch (findError) {
           console.error("\u274C Error en b\xFAsqueda de fallback:", findError.message);
         }
-      } else {
-        console.error("\u274C Error no relacionado con duplicados:", error.message);
       }
     }
-  }
-  await salesforceApi.authenticate();
-  async function afterCreate(objectName, config) {
-    try {
-      const data = await DataMapper.map({
-        data: eventData.doc,
-        map: config.map,
-        transforms: config.transforms,
-        afterTransforms: config.afterTransforms
-      });
-      const { mapToObject } = config;
-      const result = await salesforceApi.create(mapToObject, data);
-      const refId = result.id;
-      const refUrl = `https://${vars.salesforceInstanceUrl}/lightning/r/${mapToObject}/${result.id}/view`;
-      try {
-        const updatedDoc = await prolibuApi.update(objectName, eventData.doc._id, { refId, refUrl });
-        Object.assign(eventData.doc, updatedDoc);
-      } catch (error) {
-        console.error(`Failed to update Prolibu '${objectName}' with Salesforce refId:`, error);
-      }
-    } catch (error) {
-      console.error(`Failed to create Salesforce '${config.mapToObject}':`, error);
-    }
-  }
-  async function afterUpdate(objectName, config) {
+  },
+  async afterUpdate(objectName, config, event) {
     const refId = eventData?.beforeUpdateDoc?.refId;
-    const { mapToObject } = config;
     if (refId) {
       try {
-        const data = await DataMapper.map({
+        const mappedData = await DataMapper.mapWithConfig({
           data: eventData.payload,
-          map: config.map,
-          transforms: config.transforms,
-          afterTransforms: config.afterTransforms
+          config,
+          event
         });
-        console.log(`\u{1F50D} Updating existing ${mapToObject} in Salesforce with ID: ${refId}`, data);
-        await salesforceApi.update(mapToObject, refId, data);
+        await outboundApi.update(config.target, refId, mappedData);
       } catch (error) {
-        console.error(`Failed to update Salesforce '${mapToObject}':`, error);
+        console.error(`Failed to update Salesforce '${config.target}':`, error);
       }
     }
-  }
-  async function afterDelete(objectName, config) {
+  },
+  async afterDelete(objectName, config) {
     const refId = eventData?.doc?.refId;
-    const { mapToObject } = config;
     if (refId) {
       try {
-        await salesforceApi.delete(mapToObject, refId);
+        await outboundApi.delete(config.target, refId);
       } catch (error) {
-        console.error(`Failed to delete Salesforce '${mapToObject}':`, error.message);
+        console.error(
+          `Failed to delete Salesforce '${config.target}':`,
+          error.message
+        );
       }
     }
   }
-  async function toSalesforceUserId(prolibuUserId, avoidBlank = false) {
+};
+var Transforms = {
+  async getSalesforceUserId(prolibuUserId, avoidBlank = false) {
     if (!prolibuUserId) {
       return avoidBlank ? void 0 : prolibuUserId;
     }
     try {
-      const prolibUser = await prolibuApi.findOne("User", prolibuUserId, { select: "email" });
-      if (!prolibUser?.email) {
+      const prolibuUser = await prolibuApi.findOne("User", prolibuUserId, {
+        select: "email"
+      });
+      if (!prolibuUser?.email) {
         return avoidBlank ? void 0 : null;
       }
-      const salesforceUsers = await salesforceApi.find("User", {
-        where: `Email = '${prolibUser.email}' AND IsActive = true`,
+      const salesforceUsers = await outboundApi.find("User", {
+        where: { Email: prolibuUser.email, IsActive: true },
         limit: 1,
-        select: "Id,Email,Name"
+        select: "Id Email Name"
       });
       if (salesforceUsers.totalSize > 0) {
         return salesforceUsers.records[0].Id;
@@ -2126,231 +2446,310 @@ var vars = getRequiredVars({
         return avoidBlank ? void 0 : null;
       }
     } catch (error) {
-      console.error(`Error mapping Prolibu user ${prolibuUserId} to Salesforce user:`, error);
+      console.error(
+        `Error mapping Prolibu user ${prolibuUserId} to Salesforce user:`,
+        error
+      );
       return avoidBlank ? void 0 : null;
     }
-  }
-  const objectsConfig = {
-    Company: {
-      active: true,
-      mapToObject: "Account",
-      map: {
-        ...require_CompanyMap(),
-        "customFields.tipoDeCuenta": "Tipo_de_Cuenta_cc__c",
-        "customFields.razonSocial": "Name",
-        "customFields.numeroIdentificacionTributaria": "N_mero_de_identificaci_n_tributaria__c",
-        "customFields.tipoIdentificacionEmpresa": "Tipo_de_Identificaci_n_empresa__c",
-        "customFields.tipoDeCliente": "Tipo_de_Cliente_cc__c",
-        "customFields.estadoDeCliente": "Estado_cliente__c",
-        "customFields.tipoDeEmpresa": "Tipo_de_Empresa__c",
-        "customFields.segmentoCliente": "Segmento__c",
-        "customFields.macroSector": "Macro_Sector__c",
-        "customFields.necesitaCredito": "Necesita_credito__c"
-      },
-      events: {
-        "Company.afterCreate": afterCreate,
-        "Company.afterUpdate": afterUpdate,
-        "Company.afterDelete": afterDelete
-      },
-      transforms: {
-        OwnerId: toSalesforceUserId
-      },
-      afterTransforms: {
-        Estado_cliente__c: function(value) {
-          const estadoMapping = {
-            "ACTIVO": "ACTIVO",
-            "INACTIVO": "INACTIVO",
-            "PENDIENTE": "ACTIVO",
-            "SUSPENDIDO": "INACTIVO"
-          };
-          const mappedValue = estadoMapping[value] || "ACTIVO";
-          return mappedValue;
-        },
-        Ruta__c: function() {
-          return "Activa";
+  },
+  async getSalesforceContactId(prolibuContactId, avoidBlank = false) {
+    if (!prolibuContactId) {
+      return avoidBlank ? void 0 : prolibuContactId;
+    }
+    try {
+      let prolibuContact = await prolibuApi.findOne(
+        "Contact",
+        prolibuContactId,
+        {
+          select: "email refId",
+          populate: "*"
+        }
+      );
+      if (prolibuContact?.refId) {
+        return prolibuContact.refId;
+      }
+      if (prolibuContact?.email) {
+        const salesforceContacts = await outboundApi.find("Contact", {
+          where: { Email: prolibuContact.email },
+          limit: 1,
+          select: "Id"
+        });
+        if (salesforceContacts.totalSize > 0) {
+          return salesforceContacts.records[0].Id;
         }
       }
-    },
-    Contact: {
-      active: true,
-      mapToObject: "Contact",
-      map: require_ContactMap(),
-      events: {
-        "Contact.afterCreate": afterCreateWithDuplicateHandling,
-        "Contact.afterUpdate": afterUpdate,
-        "Contact.afterDelete": afterDelete
-      },
-      transforms: {
-        OwnerId: toSalesforceUserId,
-        AccountId: async function(prolibuCompanyId) {
-          if (!prolibuCompanyId && eventData.doc?.contact) {
-            try {
-              const contact = await prolibuApi.findOne("Contact", eventData.doc.contact, {
-                select: "company"
-              });
-              if (contact?.company) {
-                prolibuCompanyId = contact.company;
-              }
-            } catch (error) {
-              console.warn("Error obteniendo company del contact:", error.message);
+      return avoidBlank ? void 0 : null;
+    } catch (error) {
+      console.warn("Error mapeando contact:", error.message);
+      return avoidBlank ? void 0 : null;
+    }
+  },
+  // 🆕 Transform para AccountId CON creación automática si no existe
+  async getSalesforceAccountIdAndActivate(prolibuCompanyId, avoidBlank = false) {
+    if (!prolibuCompanyId) {
+      return avoidBlank ? void 0 : prolibuCompanyId;
+    }
+    try {
+      const company = await prolibuApi.findOne("Company", prolibuCompanyId, {
+        select: "refId customFields"
+      });
+      if (company?.refId) {
+        try {
+          const sfAccount = await outboundApi.findOne(
+            "Account",
+            company.refId,
+            {
+              select: "Id Estado_cliente__c Ruta__c Name"
             }
-          }
-          if (!prolibuCompanyId) return null;
-          try {
-            const company = await prolibuApi.findOne("Company", prolibuCompanyId, {
-              select: "refId"
-            });
-            if (company?.refId) {
-              try {
-                const sfAccount = await salesforceApi.findOne("Account", company.refId, {
-                  select: "Id, Estado_cliente__c, Name"
-                });
-                if (sfAccount) {
-                  if (sfAccount.Estado_cliente__c !== "ACTIVO") {
-                    await salesforceApi.update("Account", company.refId, {
-                      Estado_cliente__c: "ACTIVO"
-                    });
-                    await salesforceApi.findOne("Account", company.refId, {
-                      select: "Estado_cliente__c"
-                    });
-                  }
-                } else {
-                  console.error("\u274C No se encontr\xF3 el Account en Salesforce");
-                }
-              } catch (accountError) {
-                console.error("\u274C Error verificando/activando Account:", accountError.message);
-              }
-              return company.refId;
+          );
+          if (sfAccount) {
+            const needsUpdate = {
+              ...sfAccount.Estado_cliente__c !== "ACTIVO" && {
+                Estado_cliente__c: "ACTIVO"
+              },
+              ...sfAccount.Ruta__c !== "Activa" && { Ruta__c: "Activa" }
+            };
+            if (Object.keys(needsUpdate).length > 0) {
+              await outboundApi.update("Account", company.refId, needsUpdate);
             }
-            return null;
-          } catch (error) {
-            console.warn("Error mapeando company:", error.message);
-            return null;
+            return company.refId;
+          } else {
+            console.warn(
+              `\u26A0\uFE0F [ACCOUNT] refId existe pero Account no encontrado en Salesforce, recreando...`
+            );
           }
+        } catch (accountError) {
+          console.error(
+            "\u274C [ACCOUNT] Error verificando Account:",
+            accountError.message
+          );
         }
       }
-    },
-    Deal: {
-      active: true,
-      mapToObject: "Opportunity",
-      map: {
-        ...require_DealMap(),
-        "customFields.tipoEvento": "Tipo_de_Servicio__c",
-        "customFields.numeroDePersonas": "N_mero_de_Asistentes__c",
-        "customFields.numeroDeHabitaciones": "N_mero_de_Habitaciones__c",
-        // Fechas del evento
-        "customFields.fechaHoraIngreso": "Fecha_Check_In__c",
-        "customFields.fechaHoraSalida": "Fecha_Check_Out__c",
-        // Ubicación
-        "customFields.ciudadDeInteres": "Ciudad_de_Inter_s__c",
-        "customFields.hotelPreferido": "Hotel__c",
-        // Información del servicio
-        "customFields.detalleDelRequerimiento": "Description"
-      },
-      events: {
-        "Deal.afterCreate": afterCreate,
-        "Deal.afterUpdate": afterUpdate,
-        "Deal.afterDelete": afterDelete
-      },
-      transforms: {
-        OwnerId: toSalesforceUserId,
-        ContactId: async function(prolibuContactId) {
-          if (!prolibuContactId) return null;
-          try {
-            const contact = await prolibuApi.findOne("Contact", prolibuContactId, {
-              select: "email refId",
-              populate: "*"
-            });
-            if (contact?.refId) {
-              return contact.refId;
-            }
-            if (contact?.email) {
-              const sfContacts = await salesforceApi.find("Contact", {
-                where: `Email = '${contact.email.replace(/'/g, "\\'")}'`,
-                limit: 1,
-                select: "Id"
-              });
-              return sfContacts.totalSize > 0 ? sfContacts.records[0].Id : null;
-            }
-            return null;
-          } catch (error) {
-            console.warn("Error mapeando contact:", error.message);
-            return null;
+      const companyConfig = integrationConfig.find(
+        (config) => config.source === "Company"
+      );
+      if (!companyConfig) {
+        console.error("\u274C [ACCOUNT] No se encontr\xF3 configuraci\xF3n de Company");
+        return avoidBlank ? void 0 : null;
+      }
+      const createEvent = companyConfig.events.find(
+        (event) => event.name === "afterCreate"
+      );
+      if (!createEvent) {
+        console.error(
+          "\u274C [ACCOUNT] No se encontr\xF3 evento afterCreate para Company"
+        );
+        return avoidBlank ? void 0 : null;
+      }
+      try {
+        const fullCompany = await prolibuApi.findOne(
+          "Company",
+          prolibuCompanyId
+        );
+        await Handlers.afterCreate(
+          "Company",
+          companyConfig,
+          createEvent,
+          fullCompany
+        );
+        const updatedCompany = await prolibuApi.findOne(
+          "Company",
+          prolibuCompanyId,
+          {
+            select: "refId"
           }
-        },
-        AccountId: async function(prolibuCompanyId) {
-          if (!prolibuCompanyId && eventData.doc?.contact) {
-            try {
-              const contact = await prolibuApi.findOne("Contact", eventData.doc.contact, {
-                select: "company"
-              });
-              if (contact?.company) {
-                prolibuCompanyId = contact.company;
-              }
-            } catch (error) {
-              console.warn("Error obteniendo company del contact para Deal:", error.message);
-            }
-          }
-          if (!prolibuCompanyId) return null;
-          try {
-            const company = await prolibuApi.findOne("Company", prolibuCompanyId, {
-              select: "refId"
-            });
-            if (company?.refId) {
-              try {
-                const sfAccount = await salesforceApi.findOne("Account", company.refId, {
-                  select: "Id, Estado_cliente__c, Ruta__c, Name, CreatedDate"
-                });
-                if (sfAccount) {
-                  const needsUpdate = {
-                    ...sfAccount.Estado_cliente__c !== "ACTIVO" && { Estado_cliente__c: "ACTIVO" },
-                    ...sfAccount.Ruta__c !== "Activa" && { Ruta__c: "Activa" }
-                  };
-                  if (Object.keys(needsUpdate).length > 0) {
-                    await salesforceApi.update("Account", company.refId, needsUpdate);
-                    await salesforceApi.findOne("Account", company.refId, {
-                      select: "Estado_cliente__c, Ruta__c"
-                    });
-                  }
-                } else {
-                  console.error("\u274C [DEAL] No se encontr\xF3 el Account en Salesforce");
-                }
-              } catch (accountError) {
-                console.error("\u274C [DEAL] Error verificando/activando Account:", accountError.message);
-              }
-              return company.refId;
-            }
-            return null;
-          } catch (error) {
-            console.warn("Error mapeando company para Deal:", error.message);
-            return null;
-          }
+        );
+        if (updatedCompany?.refId) {
+          return updatedCompany.refId;
+        } else {
+          console.error(
+            "\u274C [ACCOUNT] Account creado pero refId no actualizado"
+          );
+          return avoidBlank ? void 0 : null;
         }
-      },
-      afterTransforms: {
-        StageName: function() {
-          return "Captura de Necesidades";
-        },
-        CloseDate: function(value) {
-          if (value) {
-            const date = new Date(value);
-            if (!isNaN(date.getTime())) {
-              return date.toISOString().split("T")[0];
-            }
-          }
-          const in30Days = /* @__PURE__ */ new Date();
-          in30Days.setDate(in30Days.getDate() + 30);
-          return in30Days.toISOString().split("T")[0];
-        },
-        Ciudad_de_Inter_s__c: function(value) {
-          return eventData.doc?.customFields?.ciudadDeInteres || value || "Bogot\xE1";
-        },
-        Hotel__c: function(value) {
-          return eventData.doc?.customFields?.hotelPreferido || value || "Hotel Distrito";
-        }
+      } catch (createError) {
+        console.error(
+          "\u274C [ACCOUNT] Error creando Account:",
+          createError.message
+        );
+        console.error("\u274C [DEBUG-ACCOUNT] Stack trace:", createError.stack);
+        return avoidBlank ? void 0 : null;
+      }
+    } catch (error) {
+      console.error("\u274C [ACCOUNT] Error general:", error.message);
+      console.error("\u274C [DEBUG-ACCOUNT] Stack trace:", error.stack);
+      return avoidBlank ? void 0 : null;
+    }
+  },
+  mapEstadoCliente(value) {
+    const estadoMapping = {
+      ACTIVO: "ACTIVO",
+      INACTIVO: "INACTIVO",
+      PENDIENTE: "ACTIVO",
+      SUSPENDIDO: "INACTIVO"
+    };
+    return estadoMapping[value] || "ACTIVO";
+  },
+  // 🆕 Mapeo de monedas - Salesforce solo acepta USD o COP
+  mapCurrency(value) {
+    if (value === void 0 || value === null) {
+      return void 0;
+    }
+    const validCurrencies = ["USD", "COP"];
+    if (validCurrencies.includes(value)) {
+      return value;
+    }
+    console.warn(
+      `\u26A0\uFE0F [CURRENCY] Moneda no v\xE1lida: "${value}", usando COP por defecto`
+    );
+    return "COP";
+  },
+  // Mapeo de Macro Sector - Solo valores diferentes entre Prolibu y Salesforce
+  mapMacroSector(value) {
+    if (!value) return value;
+    const macroSectorMap = {
+      "AGENCIA DE VIAJES TMC": "AGENCIAS DE VIAJES TMC",
+      "AGENCIA DE VIAJES VACACIONAL DMC": "AGENCIAS DE VIAJES DMC",
+      "AGENCIA DE VIAJES VACACIONAL MAYORISTA": "AGENCIA DE VIAJES",
+      "AGENCIA DE VIAJES INTERNACIONAL": "AGENCIAS DE VIAJES INTERNACIONAL",
+      "ASOCIACIONES Y AGREMICIONES": "ASOCIACIONES Y AGREMIACIONES",
+      EDUCACI\u00D3N: "EDUACI\xD3N",
+      "INDUSTRIA ENERGETICA": "INDUSTRIA ENERG\xC9TICA",
+      "TRANSPORTE A\xC9REO": "TRANSPORTE AEREO",
+      "TRANSPORTE Y LOG\xCDSTICA": "TRANSPORTE Y LOGISTICA"
+    };
+    const upperValue = value.toUpperCase().trim();
+    const mappedValue = macroSectorMap[upperValue];
+    if (mappedValue) {
+      return mappedValue;
+    }
+    return value;
+  },
+  // Default values para Deal
+  defaultStageName() {
+    return "Captura de Necesidades";
+  },
+  defaultCloseDate(value) {
+    if (value) {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split("T")[0];
       }
     }
-  };
-  const outboundIntegration = new OutboundIntegration(objectsConfig);
-  await outboundIntegration.initialize();
+    const in30Days = /* @__PURE__ */ new Date();
+    in30Days.setDate(in30Days.getDate() + 30);
+    return in30Days.toISOString().split("T")[0];
+  },
+  defaultCiudad(value) {
+    if (value !== void 0 && value !== null) {
+      return value;
+    }
+    return "Bogot\xE1";
+  },
+  defaultHotel(value) {
+    if (value !== void 0 && value !== null) {
+      return value;
+    }
+    return "Hotel Distrito";
+  }
+};
+var defaultEvents = [
+  { name: "afterCreate", handler: Handlers.afterCreate },
+  { name: "afterUpdate", handler: Handlers.afterUpdate },
+  { name: "afterDelete", handler: Handlers.afterDelete }
+];
+var integrationConfig = [
+  // ============================================================================
+  // COMPANY -> ACCOUNT
+  // ============================================================================
+  {
+    source: "Company",
+    target: "Account",
+    active: true,
+    map: {
+      ...require_CompanyMap(),
+      "customFields.tipoDeCuenta": "Tipo_de_Cuenta_cc__c",
+      "customFields.razonSocial": "Name",
+      "customFields.numeroIdentificacionTributaria": "N_mero_de_identificaci_n_tributaria__c",
+      "customFields.tipoIdentificacionEmpresa": "Tipo_de_Identificaci_n_empresa__c",
+      "customFields.tipoDeCliente": "Tipo_de_Cliente_cc__c",
+      "customFields.estadoDeCliente": "Estado_cliente__c",
+      "customFields.tipoDeEmpresa": "Tipo_de_Empresa__c",
+      "customFields.segmentoCliente": "Segmento__c",
+      "customFields.macroSector": "Macro_Sector__c",
+      "customFields.necesitaCredito": "Necesita_credito__c"
+    },
+    events: defaultEvents,
+    globalTransforms: {
+      OwnerId: Transforms.getSalesforceUserId
+    },
+    globalAfterTransforms: {
+      Estado_cliente__c: Transforms.mapEstadoCliente,
+      Ruta__c: () => "Activa",
+      CurrencyIsoCode: Transforms.mapCurrency,
+      Macro_Sector__c: Transforms.mapMacroSector
+    }
+  },
+  // ============================================================================
+  // CONTACT -> CONTACT
+  // ============================================================================
+  {
+    source: "Contact",
+    target: "Contact",
+    active: true,
+    map: {
+      ...require_ContactMap(),
+      company: "AccountId"
+    },
+    events: [
+      {
+        name: "afterCreate",
+        handler: Handlers.afterCreateContactWithDuplicateHandling
+      },
+      { name: "afterUpdate", handler: Handlers.afterUpdate },
+      { name: "afterDelete", handler: Handlers.afterDelete }
+    ],
+    globalTransforms: {
+      OwnerId: Transforms.getSalesforceUserId,
+      AccountId: Transforms.getSalesforceAccountIdAndActivate
+    }
+  },
+  // ============================================================================
+  // DEAL -> OPPORTUNITY
+  // ============================================================================
+  {
+    source: "Deal",
+    target: "Opportunity",
+    active: true,
+    map: {
+      ...require_DealMap(),
+      "customFields.tipoEvento": "Tipo_de_Servicio__c",
+      "customFields.numeroDePersonas": "N_mero_de_Asistentes__c",
+      "customFields.numeroDeHabitaciones": "N_mero_de_Habitaciones__c",
+      "customFields.fechaHoraIngreso": "Fecha_Check_In__c",
+      "customFields.fechaHoraSalida": "Fecha_Check_Out__c",
+      "customFields.ciudadDeInteres": "Ciudad_de_Inter_s__c",
+      "customFields.hotelPreferido": "Hotel__c",
+      "customFields.detalleDelRequerimiento": "Description"
+    },
+    events: defaultEvents,
+    globalTransforms: {
+      OwnerId: Transforms.getSalesforceUserId,
+      ContactId: Transforms.getSalesforceContactId,
+      AccountId: Transforms.getSalesforceAccountIdAndActivate
+      // Con activación automática
+    },
+    globalAfterTransforms: {
+      StageName: Transforms.defaultStageName,
+      CloseDate: Transforms.defaultCloseDate,
+      Ciudad_de_Inter_s__c: Transforms.defaultCiudad,
+      Hotel__c: Transforms.defaultHotel
+    }
+  }
+];
+(async function main() {
+  await outboundApi.authenticate();
+  const integration = new OutboundIntegration(integrationConfig);
+  await integration.initialize();
 })();

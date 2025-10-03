@@ -44,9 +44,11 @@ let script;
 
 // COMPANY
 let company;
+const razonSocial = `${faker.company.name()} S.A.S.`; // 🆕 Generar razón social única
+
 const companyData = {
   companyCode,
-  companyName: faker.company.name(),
+  companyName: razonSocial, // 🆕 Usar la misma razón social
   primaryPhone: faker.phone.number(),
   address: {
     street: faker.location.streetAddress(),
@@ -66,7 +68,7 @@ const companyData = {
     docId: faker.string.alphanumeric({ length: 10 }),
   },
   locale: {
-    currency: 'COP',
+    currency: 'ALL', // 🧪 Moneda INVÁLIDA para probar transformación → COP
   },
   assignee: isProd
     ? 'juan.prieto@prolibu.com'
@@ -74,14 +76,30 @@ const companyData = {
   customFields: {
     tipoDeCuenta: 'CASA MATRIZ',
     numeroIdentificacionTributaria: faker.string.numeric({ length: 10 }),
-    razonSocial: 'Test Company S.A.S.',
+    razonSocial: razonSocial, // 🆕 Usar la misma razón social
     tipoIdentificacionEmpresa: 'NIT',
     tipoDeCliente: 'EMPRESA',
     estadoDeCliente: 'ACTIVO',
     tipoDeEmpresa: 'NACIONAL',
     segmentoCliente: 'Diamante',
-    macroSector: 'AGENCIAS DE VIAJES TMC',
+    macroSector: 'INDUSTRIA ENERGETICA', // 🧪 SIN acento para probar transformación → ENERGÉTICA
     necesitaCredito: 'SI',
+  }
+};
+
+// 🧪 Casos de prueba para transforms
+const testTransformCases = {
+  currency: {
+    input: 'ALL', // Moneda no válida
+    expected: 'COP' // Debe mapear a COP
+  },
+  macroSector: {
+    input: 'INDUSTRIA ENERGETICA', // Sin acento
+    expected: 'INDUSTRIA ENERGÉTICA' // Con acento en SF
+  },
+  estadoCliente: {
+    input: 'PENDIENTE', // Estado no estándar
+    expected: 'ACTIVO' // Debe mapear a ACTIVO
   }
 };
 
@@ -272,7 +290,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
 
       it('verifies company in Salesforce', async () => {
         const sfCompany = await salesforceApi.findOne('Account', company.refId, {
-          select: sfCompanySelect,
+          select: `${sfCompanySelect}, Macro_Sector__c, Estado_cliente__c, Ruta__c`,
         });
 
         // console.log('--- sfCompany after creation:', sfCompany);
@@ -292,6 +310,25 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfCompany).toHaveProperty('BillingState');
         expect(sfCompany).toHaveProperty('BillingLatitude', company.address.location.lat);
         expect(sfCompany).toHaveProperty('BillingLongitude', company.address.location.long);
+      });
+
+      // 🧪 Test específico para transformaciones custom
+      it('validates custom field transformations', async () => {
+        const sfCompany = await salesforceApi.findOne('Account', company.refId, {
+          select: 'Id, Macro_Sector__c, Estado_cliente__c, Ruta__c, CurrencyIsoCode',
+        });
+
+        // ✅ Macro Sector debe transformarse de "INDUSTRIA ENERGETICA" → "INDUSTRIA ENERGÉTICA"
+        expect(sfCompany).toHaveProperty('Macro_Sector__c', testTransformCases.macroSector.expected);
+
+        // ✅ Estado Cliente debe estar en ACTIVO
+        expect(sfCompany).toHaveProperty('Estado_cliente__c', 'ACTIVO');
+
+        // ✅ Ruta debe estar "Activa" (requerida para Opportunities)
+        expect(sfCompany).toHaveProperty('Ruta__c', 'Activa');
+
+        // ✅ Currency debe ser COP (transformado desde ALL)
+        expect(sfCompany).toHaveProperty('CurrencyIsoCode', testTransformCases.currency.expected);
       });
 
 
@@ -337,6 +374,44 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfCompany).toHaveProperty('Id', company.refId);
         expect(sfCompany).toHaveProperty('Phone', company.primaryPhone);
       });
+
+      // 🧪 Test de diferentes transformaciones de Macro Sector
+      it('tests various macro sector transformations', async () => {
+        const macroSectorTests = [
+          {
+            prolibu: 'TRANSPORTE AÉREO',
+            salesforce: 'TRANSPORTE AEREO',
+            description: 'Quitar acento: AÉREO → AEREO'
+          },
+          {
+            prolibu: 'EDUCACIÓN',
+            salesforce: 'EDUACIÓN',
+            description: 'Error SF: EDUCACIÓN → EDUACIÓN (sin C)'
+          },
+          {
+            prolibu: 'AGENCIA DE VIAJES TMC',
+            salesforce: 'AGENCIAS DE VIAJES TMC',
+            description: 'Singular a plural: AGENCIA → AGENCIAS'
+          }
+        ];
+
+        for (const testCase of macroSectorTests) {
+          // Actualizar Macro Sector en Prolibu
+          await prolibuApi.update('Company', company._id, {
+            customFields: {
+              ...company.customFields,
+              macroSector: testCase.prolibu
+            }
+          });
+
+          // Verificar transformación en Salesforce
+          const sfCompany = await salesforceApi.findOne('Account', company.refId, {
+            select: 'Id, Macro_Sector__c',
+          });
+
+          expect(sfCompany.Macro_Sector__c).toBe(testCase.salesforce);
+        }
+      });
     });
     describe('Contact Sync', () => {
       it('creates contact with Salesforce sync', async () => {
@@ -366,7 +441,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
 
       it('verifies contact in Salesforce', async () => {
         const sfContact = await salesforceApi.findOne('Contact', contact.refId, {
-          select: sfContactSelect,
+          select: `${sfContactSelect}, AccountId`,
         });
 
         // console.log('--- sfContact after creation:', sfContact);
@@ -386,6 +461,24 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfContact).toHaveProperty('MailingState');
         expect(sfContact).toHaveProperty('MailingLatitude', contact.address.location.lat);
         expect(sfContact).toHaveProperty('MailingLongitude', contact.address.location.long);
+      });
+
+      // 🧪 Test de asociación Contact → Account
+      it('validates contact is linked to account', async () => {
+        const sfContact = await salesforceApi.findOne('Contact', contact.refId, {
+          select: 'Id, AccountId',
+        });
+
+        // ✅ Contact debe estar asociado al Account correcto
+        expect(sfContact).toHaveProperty('AccountId', company.refId);
+
+        // ✅ Verificar que el Account sigue activo después de la asociación
+        const sfAccount = await salesforceApi.findOne('Account', company.refId, {
+          select: 'Id, Estado_cliente__c, Ruta__c',
+        });
+
+        expect(sfAccount).toHaveProperty('Estado_cliente__c', 'ACTIVO');
+        expect(sfAccount).toHaveProperty('Ruta__c', 'Activa');
       });
 
       it('updates contact mobile', async () => {
@@ -454,6 +547,194 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfDeals).toHaveProperty('Name', deal.dealName);
         expect(sfDeals).toHaveProperty('CloseDate', deal.closeDate.split('T')[0]);
         expect(sfDeals).toHaveProperty('LeadSource', deal.source);
+      });
+
+      // 🧪 Test de campos requeridos por Salesforce en Opportunity
+      it('validates Salesforce required fields are set correctly', async () => {
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, Name, StageName, CloseDate, AccountId, ContactId, OwnerId',
+        });
+
+        // ✅ Campos obligatorios de Salesforce
+        expect(sfOpp).toHaveProperty('Name'); // Required
+        expect(sfOpp.Name).toBeTruthy(); // No vacío
+
+        expect(sfOpp).toHaveProperty('StageName'); // Required
+        expect(sfOpp.StageName).toBe('Captura de Necesidades'); // Default esperado
+
+        expect(sfOpp).toHaveProperty('CloseDate'); // Required
+        expect(sfOpp.CloseDate).toBeTruthy(); // No vacío
+
+        expect(sfOpp).toHaveProperty('AccountId'); // Required para crear
+        expect(sfOpp.AccountId).toBe(company.refId); // Debe apuntar a la company correcta
+
+        expect(sfOpp).toHaveProperty('ContactId'); // Importante para seguimiento
+        expect(sfOpp.ContactId).toBe(contact.refId); // Debe apuntar al contact correcto
+
+        expect(sfOpp).toHaveProperty('OwnerId'); // Required
+        expect(sfOpp.OwnerId).toBeTruthy(); // Debe tener un owner
+      });
+
+      // 🧪 Test de custom fields específicos de Prolibu
+      it('validates custom Prolibu fields are mapped correctly', async () => {
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: `Id, Tipo_de_Servicio__c, N_mero_de_Asistentes__c, N_mero_de_Habitaciones__c, 
+                   Fecha_Check_In__c, Fecha_Check_Out__c, Ciudad_de_Inter_s__c, Hotel__c, Description`,
+        });
+
+        // ✅ Custom fields de Prolibu
+        expect(sfOpp).toHaveProperty('Tipo_de_Servicio__c', 'Hospedaje');
+        expect(sfOpp).toHaveProperty('N_mero_de_Asistentes__c', 25);
+
+        // ⚠️ numeroDeHabitaciones puede ser null si no es requerido en Prolibu
+        // Solo validamos si tiene valor
+        if (deal.customFields.numeroDeHabitaciones) {
+          expect(sfOpp.N_mero_de_Habitaciones__c).toBe(12);
+        }
+
+        expect(sfOpp.Fecha_Check_In__c).toMatch(/2025-10-15T15:00:00.000/);
+        expect(sfOpp.Fecha_Check_Out__c).toMatch(/2025-10-17T11:00:00.000/);
+        expect(sfOpp).toHaveProperty('Ciudad_de_Inter_s__c', 'Bogotá');
+        expect(sfOpp).toHaveProperty('Hotel__c', 'Hotel Test Plaza');
+        expect(sfOpp).toHaveProperty('Description', 'Evento corporativo con hospedaje para 25 personas');
+      });
+
+      // 🧪 Test de defaults aplicados por transforms
+      it('validates default values are applied when fields are missing', async () => {
+        // Crear un Deal sin algunos campos opcionales
+        const minimalDealData = {
+          dealName: `Minimal Deal ${faker.string.alphanumeric(6)}`,
+          closeDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(), // +45 días
+          source: 'Email',
+          contact: contact._id,
+          company: company._id,
+          customFields: {
+            tipoEvento: 'Reunión',
+            numeroDePersonas: 10,
+            ciudadDeInteres: 'Medellin', // ✅ Incluir ciudadDeInteres (es requerido en Prolibu)
+            // ❌ SIN: hotelPreferido (opcional, debe aplicar default)
+          }
+        };
+
+        const minimalDeal = await prolibuApi.create('Deal', minimalDealData);
+
+        expect(minimalDeal).toHaveProperty('refId');
+
+        // Verificar defaults en Salesforce
+        const sfOpp = await salesforceApi.findOne('Opportunity', minimalDeal.refId, {
+          select: 'Id, StageName, CloseDate, Ciudad_de_Inter_s__c, Hotel__c',
+        });
+
+        // ✅ StageName debe tener default
+        expect(sfOpp.StageName).toBe('Captura de Necesidades');
+
+        // ✅ Ciudad debe mantener el valor enviado "Medellin"
+        expect(sfOpp.Ciudad_de_Inter_s__c).toBe('Medellin');
+
+        // ✅ Hotel debe tener default "Hotel Distrito" (no se envió)
+        expect(sfOpp.Hotel__c).toBe('Hotel Distrito');
+
+        // Cleanup
+        await prolibuApi.delete('Deal', minimalDeal._id);
+        await salesforceApi.delete('Opportunity', minimalDeal.refId);
+      });
+
+      // 🧪 Test de UPDATE en Deal → Opportunity
+      it('updates deal name and syncs to Salesforce', async () => {
+        const newDealName = `Updated Deal ${faker.string.alphanumeric(6)}`;
+
+        deal = await prolibuApi.update('Deal', deal._id, {
+          dealName: newDealName,
+        });
+
+        expect(deal).toHaveProperty('dealName', newDealName);
+
+        // Verificar sincronización en Salesforce
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, Name',
+        });
+
+        expect(sfOpp.Name).toBe(newDealName);
+      });
+
+      // 🧪 Test de UPDATE de custom fields
+      it('updates custom fields and syncs to Salesforce', async () => {
+        const updates = {
+          customFields: {
+            ...deal.customFields,
+            numeroDePersonas: 50, // Cambiar de 25 a 50
+            ciudadDeInteres: 'Medellín', // Cambiar de Bogotá a Medellín
+            hotelPreferido: 'Hotel Plaza Actualizado',
+          }
+        };
+
+        deal = await prolibuApi.update('Deal', deal._id, updates);
+
+        // Verificar sincronización en Salesforce
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, N_mero_de_Asistentes__c, Ciudad_de_Inter_s__c, Hotel__c',
+        });
+
+        expect(sfOpp.N_mero_de_Asistentes__c).toBe(50);
+        expect(sfOpp.Ciudad_de_Inter_s__c).toBe('Medellín');
+        expect(sfOpp.Hotel__c).toBe('Hotel Plaza Actualizado');
+      });
+
+      // 🧪 Test de UPDATE de CloseDate
+      it('updates closeDate and validates format in Salesforce', async () => {
+        const newCloseDate = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(); // +60 días
+
+        deal = await prolibuApi.update('Deal', deal._id, {
+          closeDate: newCloseDate,
+        });
+
+        expect(deal.closeDate).toBe(newCloseDate);
+
+        // Verificar formato de fecha en Salesforce (YYYY-MM-DD)
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, CloseDate',
+        });
+
+        expect(sfOpp.CloseDate).toBe(newCloseDate.split('T')[0]);
+      });
+
+      // 🧪 Test de UPDATE parcial (solo algunos campos)
+      it('handles partial updates without affecting other fields', async () => {
+        // Guardar valores actuales
+        const currentNumPersonas = deal.customFields.numeroDePersonas;
+        const currentCiudad = deal.customFields.ciudadDeInteres;
+
+        // Update solo descripción
+        deal = await prolibuApi.update('Deal', deal._id, {
+          customFields: {
+            ...deal.customFields,
+            detalleDelRequerimiento: 'Nueva descripción actualizada',
+          }
+        });
+
+        // Verificar que otros campos NO cambiaron
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, Description, N_mero_de_Asistentes__c, Ciudad_de_Inter_s__c',
+        });
+
+        expect(sfOpp.Description).toBe('Nueva descripción actualizada');
+        expect(sfOpp.N_mero_de_Asistentes__c).toBe(currentNumPersonas); // ✅ No cambió
+        expect(sfOpp.Ciudad_de_Inter_s__c).toBe(currentCiudad); // ✅ No cambió
+      });
+
+      // 🧪 Test de validación de relaciones Account/Contact
+      it('validates Account and Contact relationships remain intact after updates', async () => {
+        // Hacer varios updates
+        await prolibuApi.update('Deal', deal._id, { dealName: 'Test Relaciones' });
+
+        const sfOpp = await salesforceApi.findOne('Opportunity', deal.refId, {
+          select: 'Id, Name, AccountId, ContactId',
+        });
+
+        // ✅ Las relaciones deben mantenerse
+        expect(sfOpp.AccountId).toBe(company.refId);
+        expect(sfOpp.ContactId).toBe(contact.refId);
+        expect(sfOpp.Name).toBe('Test Relaciones');
       });
     });
 
