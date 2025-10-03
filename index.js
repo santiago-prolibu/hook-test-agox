@@ -243,7 +243,7 @@ const Handlers = {
         await outboundApi.delete(config.target, refId);
       } catch (error) {
         console.error(
-          `Failed to delete Salesforce '${config.target}':`,
+          `❌ Failed to delete Salesforce '${config.target}':`,
           error.message
         );
       }
@@ -507,6 +507,27 @@ const Transforms = {
     return value;
   },
 
+  // 🆕 Mapeo de Tipo de Evento/Servicio - Prolibu → Salesforce
+  mapTipoServicio(value) {
+    if (!value) return value;
+
+    const tipoServicioMap = {
+      "Evento": "Eventos", // Singular → Plural
+      "Hospedaje + Evento": "Hospedaje - Eventos", // + → - y plural
+      "Evento Interno": "Eventos", // Mapear a Eventos genérico (o ajustar según necesidad)
+    };
+
+    // Buscar mapeo exacto (case-sensitive para preservar formato)
+    const mappedValue = tipoServicioMap[value];
+
+    if (mappedValue) {
+      return mappedValue;
+    }
+
+    // Si no está en el mapa, pasar tal cual (ej: "Hospedaje" se mantiene igual)
+    return value;
+  },
+
   // Default values para Deal
   defaultStageName() {
     return "Captura de Necesidades";
@@ -527,21 +548,42 @@ const Transforms = {
   },
 
   defaultCiudad(value) {
-    // Si el valor existe y no es undefined/null, usarlo
-    if (value !== undefined && value !== null) {
+    // Si el valor existe y no es undefined/null/empty, usarlo
+    if (value !== undefined && value !== null && value !== '') {
       return value;
     }
-    // Solo aplicar default si es undefined o null
+    // Solo aplicar default si es undefined, null o vacío
     return "Bogotá";
   },
 
-  defaultHotel(value) {
-    // Si el valor existe y no es undefined/null, usarlo
-    if (value !== undefined && value !== null) {
+  defaultHotel(value, mappedData) {
+    // Si el valor existe y no es undefined/null/empty, usarlo
+    if (value !== undefined && value !== null && value !== '') {
       return value;
     }
-    // Solo aplicar default si es undefined o null
-    return "Hotel Distrito";
+
+    // Mapeo de hoteles válidos por ciudad según Salesforce picklist dependencies
+    // Basado en el campo "validFor" del schema de Salesforce
+    const hotelsPorCiudad = {
+      'Bogotá': 'Hotel Distrito',        // validFor: gAAA (Bogotá)
+      'Cartagena': 'Hotel Karmairi',     // validFor: QAAA (Cartagena)
+      'Palomino': 'Hotel Naio',          // validFor: IAAA (Palomino)
+      'Guajira': 'Hotel Waya',           // validFor: EAAA (Guajira)
+      'Santa Marta': 'Hotel Ac Santa Marta', // validFor: CAAA (Santa Marta)
+      'Barranquilla': 'Hotel Hiex Barranquilla', // validFor: BAAA (Barranquilla)
+      'Bucaramanga': 'Hotel Bari',       // validFor: AgAA (Bucaramanga)
+      'Medellín': 'Hotel Fairfield Sabaneta', // validFor: AQAA (Medellín)
+      'Quibdó': 'Hotel Mia',             // validFor: AIAA (Quibdó)
+      'Yopal': 'Hotel Hiex Yopal',       // validFor: AEAA (Yopal)
+      'San Andrés': 'Hotel Grand Sirenis', // validFor: ACAA (San Andrés)
+      'Pereira': 'Hotel Mia',            // Usar un hotel genérico (ajustar según disponibilidad)
+    };
+
+    // Obtener la ciudad del mappedData
+    const ciudad = mappedData?.Ciudad_de_Inter_s__c;
+
+    // Devolver hotel según la ciudad, o default a Bogotá
+    return hotelsPorCiudad[ciudad] || hotelsPorCiudad['Bogotá'];
   },
 };
 
@@ -644,6 +686,7 @@ const integrationConfig = [
     globalAfterTransforms: {
       StageName: Transforms.defaultStageName,
       CloseDate: Transforms.defaultCloseDate,
+      Tipo_de_Servicio__c: Transforms.mapTipoServicio, // 🆕 Mapear tipo de servicio
       Ciudad_de_Inter_s__c: Transforms.defaultCiudad,
       Hotel__c: Transforms.defaultHotel,
     },

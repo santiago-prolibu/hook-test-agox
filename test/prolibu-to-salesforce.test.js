@@ -100,6 +100,10 @@ const testTransformCases = {
   estadoCliente: {
     input: 'PENDIENTE', // Estado no estándar
     expected: 'ACTIVO' // Debe mapear a ACTIVO
+  },
+  tipoServicio: {
+    input: 'Evento', // Singular en Prolibu
+    expected: 'Eventos' // Plural en Salesforce
   }
 };
 
@@ -516,7 +520,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
             fechaHoraIngreso: '2025-10-15T15:00:00.000Z',
             fechaHoraSalida: '2025-10-17T11:00:00.000Z',
             ciudadDeInteres: 'Bogotá',
-            hotelPreferido: 'Hotel Test Plaza',
+            hotelPreferido: 'Hotel Distrito', // ✅ Hotel válido para Bogotá (validFor: gAAA)
             detalleDelRequerimiento: 'Evento corporativo con hospedaje para 25 personas',
           }
         };
@@ -595,9 +599,58 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         expect(sfOpp.Fecha_Check_In__c).toMatch(/2025-10-15T15:00:00.000/);
         expect(sfOpp.Fecha_Check_Out__c).toMatch(/2025-10-17T11:00:00.000/);
         expect(sfOpp).toHaveProperty('Ciudad_de_Inter_s__c', 'Bogotá');
-        expect(sfOpp).toHaveProperty('Hotel__c', 'Hotel Test Plaza');
+        expect(sfOpp).toHaveProperty('Hotel__c', 'Hotel Distrito'); // ✅ Hotel válido para Bogotá
         expect(sfOpp).toHaveProperty('Description', 'Evento corporativo con hospedaje para 25 personas');
       });
+
+      // 🧪 Test de transformación de Tipo de Servicio
+      it('validates tipo de servicio transformations', async () => {
+        const tipoServicioTests = [
+          {
+            prolibu: 'Evento',
+            salesforce: 'Eventos',
+            description: 'Singular → Plural'
+          },
+          {
+            prolibu: 'Hospedaje + Evento',
+            salesforce: 'Hospedaje - Eventos',
+            description: '+ → - y plural'
+          },
+          {
+            prolibu: 'Hospedaje',
+            salesforce: 'Hospedaje',
+            description: 'Sin cambios'
+          }
+        ];
+
+        for (const testCase of tipoServicioTests) {
+          // Crear Deal con tipo de servicio específico
+          const testDeal = await prolibuApi.create('Deal', {
+            dealName: `Test ${testCase.prolibu} ${faker.string.alphanumeric(4)}`,
+            closeDate: faker.date.future().toISOString(),
+            source: 'Web',
+            contact: contact._id,
+            company: company._id,
+            customFields: {
+              tipoEvento: testCase.prolibu,
+              numeroDePersonas: 10,
+              ciudadDeInteres: 'Bogotá',
+            }
+          });
+
+          expect(testDeal).toHaveProperty('refId');
+
+          // Verificar transformación en Salesforce
+          const sfOpp = await salesforceApi.findOne('Opportunity', testDeal.refId, {
+            select: 'Id, Tipo_de_Servicio__c',
+          });
+
+          expect(sfOpp.Tipo_de_Servicio__c).toBe(testCase.salesforce);
+
+          // Cleanup: Solo de Prolibu (Salesforce se limpia automáticamente)
+          await prolibuApi.delete('Deal', testDeal._id);
+        }
+      }, 10000); // 🔧 Aumentar timeout a 10s para 3 iteraciones (~2.2s cada una)
 
       // 🧪 Test de defaults aplicados por transforms
       it('validates default values are applied when fields are missing', async () => {
@@ -609,10 +662,10 @@ describe('Prolibu ↔ Salesforce Integration', () => {
           contact: contact._id,
           company: company._id,
           customFields: {
-            tipoEvento: 'Reunión',
+            tipoEvento: 'Evento', // ✅ Valor válido del enum (Hospedaje, Evento, Hospedaje + Evento, Evento Interno)
             numeroDePersonas: 10,
-            ciudadDeInteres: 'Medellin', // ✅ Incluir ciudadDeInteres (es requerido en Prolibu)
-            // ❌ SIN: hotelPreferido (opcional, debe aplicar default)
+            ciudadDeInteres: 'Medellín', // ✅ Con acento (valor válido del enum de Prolibu)
+            // ❌ SIN: hotelPreferido (opcional, debe aplicar default según ciudad)
           }
         };
 
@@ -628,15 +681,14 @@ describe('Prolibu ↔ Salesforce Integration', () => {
         // ✅ StageName debe tener default
         expect(sfOpp.StageName).toBe('Captura de Necesidades');
 
-        // ✅ Ciudad debe mantener el valor enviado "Medellin"
-        expect(sfOpp.Ciudad_de_Inter_s__c).toBe('Medellin');
+        // ✅ Ciudad debe mantener el valor enviado "Medellín"
+        expect(sfOpp.Ciudad_de_Inter_s__c).toBe('Medellín');
 
-        // ✅ Hotel debe tener default "Hotel Distrito" (no se envió)
-        expect(sfOpp.Hotel__c).toBe('Hotel Distrito');
+        // ✅ Hotel debe usar default según la ciudad = "Hotel Fairfield Sabaneta" para Medellín
+        expect(sfOpp.Hotel__c).toBe('Hotel Fairfield Sabaneta');
 
-        // Cleanup
+        // Cleanup: Solo de Prolibu (Salesforce se limpia automáticamente)
         await prolibuApi.delete('Deal', minimalDeal._id);
-        await salesforceApi.delete('Opportunity', minimalDeal.refId);
       });
 
       // 🧪 Test de UPDATE en Deal → Opportunity
@@ -664,7 +716,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
             ...deal.customFields,
             numeroDePersonas: 50, // Cambiar de 25 a 50
             ciudadDeInteres: 'Medellín', // Cambiar de Bogotá a Medellín
-            hotelPreferido: 'Hotel Plaza Actualizado',
+            hotelPreferido: 'Hotel Fairfield Sabaneta', // ✅ Hotel válido para Medellín (validFor: AQAA)
           }
         };
 
@@ -677,7 +729,7 @@ describe('Prolibu ↔ Salesforce Integration', () => {
 
         expect(sfOpp.N_mero_de_Asistentes__c).toBe(50);
         expect(sfOpp.Ciudad_de_Inter_s__c).toBe('Medellín');
-        expect(sfOpp.Hotel__c).toBe('Hotel Plaza Actualizado');
+        expect(sfOpp.Hotel__c).toBe('Hotel Fairfield Sabaneta'); // ✅ Hotel válido para Medellín
       });
 
       // 🧪 Test de UPDATE de CloseDate

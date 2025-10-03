@@ -2416,7 +2416,7 @@ var Handlers = {
         await outboundApi.delete(config.target, refId);
       } catch (error) {
         console.error(
-          `Failed to delete Salesforce '${config.target}':`,
+          `\u274C Failed to delete Salesforce '${config.target}':`,
           error.message
         );
       }
@@ -2626,6 +2626,23 @@ var Transforms = {
     }
     return value;
   },
+  // 🆕 Mapeo de Tipo de Evento/Servicio - Prolibu → Salesforce
+  mapTipoServicio(value) {
+    if (!value) return value;
+    const tipoServicioMap = {
+      "Evento": "Eventos",
+      // Singular → Plural
+      "Hospedaje + Evento": "Hospedaje - Eventos",
+      // + → - y plural
+      "Evento Interno": "Eventos"
+      // Mapear a Eventos genérico (o ajustar según necesidad)
+    };
+    const mappedValue = tipoServicioMap[value];
+    if (mappedValue) {
+      return mappedValue;
+    }
+    return value;
+  },
   // Default values para Deal
   defaultStageName() {
     return "Captura de Necesidades";
@@ -2642,16 +2659,43 @@ var Transforms = {
     return in30Days.toISOString().split("T")[0];
   },
   defaultCiudad(value) {
-    if (value !== void 0 && value !== null) {
+    if (value !== void 0 && value !== null && value !== "") {
       return value;
     }
     return "Bogot\xE1";
   },
-  defaultHotel(value) {
-    if (value !== void 0 && value !== null) {
+  defaultHotel(value, mappedData) {
+    if (value !== void 0 && value !== null && value !== "") {
       return value;
     }
-    return "Hotel Distrito";
+    const hotelsPorCiudad = {
+      "Bogot\xE1": "Hotel Distrito",
+      // validFor: gAAA (Bogotá)
+      "Cartagena": "Hotel Karmairi",
+      // validFor: QAAA (Cartagena)
+      "Palomino": "Hotel Naio",
+      // validFor: IAAA (Palomino)
+      "Guajira": "Hotel Waya",
+      // validFor: EAAA (Guajira)
+      "Santa Marta": "Hotel Ac Santa Marta",
+      // validFor: CAAA (Santa Marta)
+      "Barranquilla": "Hotel Hiex Barranquilla",
+      // validFor: BAAA (Barranquilla)
+      "Bucaramanga": "Hotel Bari",
+      // validFor: AgAA (Bucaramanga)
+      "Medell\xEDn": "Hotel Fairfield Sabaneta",
+      // validFor: AQAA (Medellín)
+      "Quibd\xF3": "Hotel Mia",
+      // validFor: AIAA (Quibdó)
+      "Yopal": "Hotel Hiex Yopal",
+      // validFor: AEAA (Yopal)
+      "San Andr\xE9s": "Hotel Grand Sirenis",
+      // validFor: ACAA (San Andrés)
+      "Pereira": "Hotel Mia"
+      // Usar un hotel genérico (ajustar según disponibilidad)
+    };
+    const ciudad = mappedData?.Ciudad_de_Inter_s__c;
+    return hotelsPorCiudad[ciudad] || hotelsPorCiudad["Bogot\xE1"];
   }
 };
 var defaultEvents = [
@@ -2743,6 +2787,8 @@ var integrationConfig = [
     globalAfterTransforms: {
       StageName: Transforms.defaultStageName,
       CloseDate: Transforms.defaultCloseDate,
+      Tipo_de_Servicio__c: Transforms.mapTipoServicio,
+      // 🆕 Mapear tipo de servicio
       Ciudad_de_Inter_s__c: Transforms.defaultCiudad,
       Hotel__c: Transforms.defaultHotel
     }
